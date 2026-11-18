@@ -94,21 +94,33 @@ def write_fits(path: pathlib.Path, *, lines: int = 1024, samples: int = 1024,
 
 
 def write_label(path: pathlib.Path, image: str | None, *, host: str = 'NEW HORIZONS',
-                instrument: str = 'LORRI') -> pathlib.Path:
-    """Write a minimal detached PDS3 label pointing at `image` and return its path.
+                instrument: str = 'LORRI', lines: int = 1024,
+                target: str = 'J17 CALLIRRHOE') -> pathlib.Path:
+    """Write a detached PDS3 label pointing at `image` and return its path.
 
-    With `image` None, the label has no ``^IMAGE`` pointer.
+    The label gives the values that an astrometry read takes from it, and an IMAGE object
+    of the given number of lines. With `image` None, the label has no ``^IMAGE`` pointer.
     """
 
-    lines = ['PDS_VERSION_ID = PDS3',
-             'RECORD_TYPE = FIXED_LENGTH',
-             'RECORD_BYTES = 2880']
+    text = ['PDS_VERSION_ID = PDS3',
+            'RECORD_TYPE = FIXED_LENGTH',
+            'RECORD_BYTES = 2880']
     if image is not None:
-        lines.append(f'^IMAGE = ("{image}", 1)')
-    lines += [f'INSTRUMENT_HOST_NAME = "{host}"',
-              f'INSTRUMENT_ID = "{instrument}"',
-              'END', '']
-    path.write_text('\r\n'.join(lines))
+        text.append(f'^IMAGE = ("{image}", 1)')
+    text += [f'INSTRUMENT_HOST_NAME = "{host}"',
+             f'INSTRUMENT_ID = "{instrument}"',
+             f'TARGET_NAME = "{target}"',
+             'START_TIME = 2007-01-10T05:41:08.363',
+             'STOP_TIME = 2007-01-10T05:41:13.363',
+             'SPACECRAFT_CLOCK_START_COUNT = "0030713585:49000"',
+             'SPACECRAFT_CLOCK_STOP_COUNT = "0030713590:49000"',
+             'EXPOSURE_DURATION = 5.000 <s>',
+             'OBJECT = IMAGE',
+             f'  LINES = {lines}',
+             f'  LINE_SAMPLES = {lines}',
+             'END_OBJECT = IMAGE',
+             'END', '']
+    path.write_text('\r\n'.join(text))
     return path
 
 

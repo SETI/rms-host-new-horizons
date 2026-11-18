@@ -10,6 +10,7 @@ and the index and supplement of NHJULO_2001 keep rows 21-50. Each file is rename
 an ``_edited`` suffix, and the labels name the renamed files.
 """
 
+import pathlib
 from typing import Any
 
 import numpy as np
@@ -26,7 +27,7 @@ INDEX = TEST_FILES / 'NHJULO_2001_index_edited.lbl'
 PRODUCTS = ['eng', 'sci']
 INPUTS = ['lbl', 'host_fit', 'host_lbl']
 
-# The index gives the start of the exposure to the millisecond
+# The index and the label give the start of the exposure to the millisecond
 INDEX_TIME_TOLERANCE = 1.e-3    # seconds
 
 # The corners and center of the 256x256 field of view
@@ -181,5 +182,41 @@ def test_index_row_target_matches_the_fits_file() -> None:
 
 def test_index_row_target_is_a_python_string() -> None:
     assert type(index_row().target) is str
+
+##########################################################################################
+# An astrometry read of the label alone
+##########################################################################################
+
+
+@pytest.fixture
+def label_alone(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A copy of the calibrated product's label, in a directory without its FITS file."""
+
+    path = tmp_path / f'{STEM}_sci_edited.lbl'
+    path.write_bytes((TEST_FILES / path.name).read_bytes())
+    return path
+
+
+def test_label_astrometry_needs_no_fits_file(label_alone: pathlib.Path) -> None:
+    obs = NewHorizonsLORRI.from_file(label_alone, astrometry=True)
+    assert obs.basename == f'{STEM}_sci_edited.fit'
+
+
+@pytest.mark.parametrize('attribute', ['binning_mode', 'spacecraft_clock_start_count',
+                                       'spacecraft_clock_stop_count', 'fov'])
+def test_label_astrometry_matches_the_fits_file(label_alone: pathlib.Path,
+                                                attribute: str) -> None:
+    obs = NewHorizonsLORRI.from_file(label_alone, astrometry=True)
+    assert getattr(obs, attribute) == getattr(load('sci', 'fit'), attribute)
+
+
+def test_label_astrometry_time_matches_the_fits_file(label_alone: pathlib.Path) -> None:
+    obs = NewHorizonsLORRI.from_file(label_alone, astrometry=True)
+    assert obs.time == pytest.approx(load('sci', 'fit').time, abs=INDEX_TIME_TOLERANCE)
+
+
+def test_label_astrometry_target_is_the_label_target(label_alone: pathlib.Path) -> None:
+    obs = NewHorizonsLORRI.from_file(label_alone, astrometry=True)
+    assert obs.target == 'J17 CALLIRRHOE'
 
 ##########################################################################################

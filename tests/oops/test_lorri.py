@@ -631,12 +631,57 @@ def test_from_file_label_of_another_instrument(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_file(label)
 
 
-def test_from_file_label_astrometry(tmp_path: pathlib.Path) -> None:
-    write_fits(tmp_path / 'lor_test.fit')
+def test_from_file_label_astrometry_needs_no_fits_file(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
     obs = NewHorizonsLORRI.from_file(label, astrometry=True)
+    assert obs.filepath == FCPath(tmp_path / 'lor_test.fit')
     assert 'data' not in obs.subfields
-    assert obs.basename == 'lor_test.fit'
+    assert 'headers' not in obs.subfields
+
+
+def test_from_file_label_astrometry_reads_no_fits_file(tmp_path: pathlib.Path) -> None:
+    write_fits(tmp_path / 'lor_test.fit', SPCCBTNM='EUROPA', EXPTIME=0.1)
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
+    obs = NewHorizonsLORRI.from_file(label, astrometry=True)
+    assert obs.target == 'J17 CALLIRRHOE'
+    assert obs.texp == 5.
+
+
+def test_from_file_label_astrometry_values(tmp_path: pathlib.Path) -> None:
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', lines=256)
+    obs = NewHorizonsLORRI.from_file(label, astrometry=True)
+    tstart = julian.tdb_from_tai(julian.tai_from_iso('2007-01-10T05:41:08.363'))
+    assert obs.time == pytest.approx((tstart, tstart + 5.))
+    assert obs.binning_mode == '4X4'
+    assert obs.fov is NewHorizonsLORRI._FOVS['4X4', 'fast']
+    assert obs.label_target == 'J17 CALLIRRHOE'
+    assert obs.spacecraft_clock_start_count == '0030713585:49000'
+    assert obs.spacecraft_clock_stop_count == '0030713590:49000'
+    assert obs.dict['INSTRUMENT_ID'] == 'LORRI'
+    assert obs.frame.frame_id == 'NH_LORRI'
+
+
+def test_from_file_label_astrometry_target(tmp_path: pathlib.Path) -> None:
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', target='CALIBRATION')
+    obs = NewHorizonsLORRI.from_file(label, astrometry=True)
+    assert obs.target == 'NONE'
+
+
+def test_from_file_label_astrometry_rejects_an_unknown_shape(
+        tmp_path: pathlib.Path) -> None:
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', lines=512)
+    with pytest.raises(oops.host.HostFormatError,
+                       match='unrecognized LORRI image shape: 512 lines'):
+        NewHorizonsLORRI.from_file(label, astrometry=True)
+
+
+@pytest.mark.parametrize(('option', 'value'), [('geom', 'fits'), ('pointing', 'fits')])
+def test_from_file_label_astrometry_rejects_fits_geometry(
+        tmp_path: pathlib.Path, option: str, value: str) -> None:
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
+    options: dict[str, Any] = {option: value}
+    with pytest.raises(oops.OopsValueError, match='need the FITS file'):
+        NewHorizonsLORRI.from_file(label, astrometry=True, **options)
 
 ##########################################################################################
 # from_file() on other inputs
@@ -782,7 +827,7 @@ def test_from_index_rejects_an_invalid_fov_type() -> None:
 
 
 @pytest.mark.parametrize(('label_target', 'target'), [
-    ('---', 'NONE'),
+    ('CALIBRATION', 'NONE'),
     ('PLUTO-CHARON', 'PLUTO'),
 ])
 def test_from_index_row_target(label_target: str, target: str) -> None:
