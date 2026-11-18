@@ -102,8 +102,8 @@ _LABEL_ROUNDING = 0.5e-3 + 1.e-6        # seconds, with room for floating-point 
 ##########################################################################################
 # The resolution rules. Where the detached label and the FITS header both give an item
 # and the values differ, the rule for that item picks one. Evidence: a survey of the
-# label and header of 7,897 products, a random sample of all 14 volumes (2026-11-18);
-# each issue gives the counts and examples, and #13 lists the items only one source has.
+# label and header of 7,897 products, a random sample of all 14 volumes (2026-11-18),
+# recorded with every other difference between the two in #13.
 ##########################################################################################
 
 
@@ -150,11 +150,11 @@ def _spice_body_wins(label_value, fits_value):
 _RESOLUTION_RULES = {
     # START_TIME: the label writes the FITS header's start (SPCSCET - EXPTIME/2) rounded
     # to the millisecond on all 7,897 products surveyed; the header's value is the
-    # precise one (#11).
+    # precise one (#13).
     'START_TIME': _rounded_label_loses,
 
     # EXPOSURE_DURATION: equal on 7,170 products; on the other 727 they differ only in
-    # the last bit of the header's binary value, 9.9676 against 9.967600000000001 (#12).
+    # the last bit of the header's binary value, 9.9676 against 9.967600000000001 (#13).
     'EXPOSURE_DURATION': _rounded_label_loses,
 
     # TARGET_NAME: both give a name and they differ on 1,005 products, and neither source
@@ -163,7 +163,7 @@ _RESOLUTION_RULES = {
     # a pointing ("RADEC=270.66,-14.63=P4") or a misspelling ("FJUPITER") where the label
     # names the body ("KERBEROS", "JUPITER") on 93; on 807 SPICE knows neither name. The
     # target body must be one that SPICE knows, so a name it knows wins; otherwise the
-    # label's, the default (#10).
+    # label's, the default (#13).
     'TARGET_NAME': _spice_body_wins,
 
     # The clock counts agree on all 7,897 products surveyed, so the default applies.
