@@ -41,7 +41,7 @@ The `host_new_horizons` module is available via the `rms-host-new-horizons` pack
 PyPI and can be installed with:
 
 ```sh
-/seti/newnav/capped-run.sh pip install rms-host-new-horizons
+pip install rms-host-new-horizons
 ```
 
 Geometry calculations need the New Horizons SPICE kernels. The host selects them through
@@ -90,9 +90,10 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
   FITS header with `geom='fits'`. The camera distortion is modeled by a polynomial,
   which `fov_type='flat'` replaces with an undistorted field of view.
 - `NewHorizonsLORRI.from_index()` makes one `Snapshot` for each row of a volume index.
-  It merges in the columns of the supplemental index, matching its rows to the index's
-  by VOLUME_ID and FILE_SPECIFICATION_NAME, and keeps the supplement's value of a column
-  that both give.
+  It merges in the columns of the supplemental index, whose rows must list the same
+  products in the same order: each pair of rows must agree in VOLUME_ID and
+  FILE_SPECIFICATION_NAME. Where both tables give a column, the supplement's value is
+  kept.
 
 Details are available in the
 [module documentation](https://rms-host-new-horizons.readthedocs.io/en/latest/module.html).

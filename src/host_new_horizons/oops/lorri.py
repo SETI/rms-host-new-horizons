@@ -291,6 +291,10 @@ class NewHorizonsLORRI(oops.Host):
             hdulist = parsed
             if filepath is None:
                 filepath = FCPath(hdulist.filename())
+                if not NewHorizonsLORRI._detect_in_fits(hdulist):
+                    hdulist.close()
+                    raise oops.host.WrongHostError(f'not a {NewHorizonsLORRI.NAME} '
+                                                   f'FITS file: {filepath}')
 
         # Everything needed is copied out of the file, which is then closed, including
         # an HDUList that oops.Host.from_file() or the caller opened
@@ -586,17 +590,22 @@ class NewHorizonsLORRI(oops.Host):
         label_target = header['SPCCBTNM']
         target_name = NewHorizonsLORRI._repair_target(label_target)
 
-        # Define the path and frame
-        if geom == 'spice':
+        # Define the path and frame. A default that an override replaces is not built,
+        # so the header need not give its values, and the apparent pointing uses the
+        # observer that the Snapshot will have.
+        if overrides['path'] is not None:
+            default_path = overrides['path']
+        elif geom == 'spice':
             default_path = _NewHorizons.PATH_ID
         else:
             default_path = NewHorizonsLORRI._fits_path_from_header(header, filepath,
                                                                    tdb_midtime)
 
         using_cks = overrides['frame'] is None and pointing == 'spice'
-        if pointing == 'spice':
-            if overrides['frame'] is None:
-                NewHorizonsLORRI._define_camera_frame()
+        if overrides['frame'] is not None:
+            default_frame = overrides['frame']
+        elif pointing == 'spice':
+            NewHorizonsLORRI._define_camera_frame()
             default_frame = _SPICE_FRAME_NAME
         else:
             default_frame = NewHorizonsLORRI._fits_frame_from_header(
@@ -922,7 +931,8 @@ class NewHorizonsLORRI(oops.Host):
 
         denom = np.cos(dec0) - eta * np.sin(dec0)
 
-        ra  = oops.DPR * (np.arctan(xi / denom) + ra0)
+        # The two-argument arctangent keeps the quadrant of a pixel beyond a pole
+        ra  = oops.DPR * (np.arctan2(xi, denom) + ra0)
         dec = oops.DPR * np.arctan((eta * np.cos(dec0) + np.sin(dec0))
                                    / np.sqrt(denom**2 + xi**2))
 

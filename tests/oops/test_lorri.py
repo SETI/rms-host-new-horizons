@@ -501,6 +501,41 @@ def test_radec_from_uv_off_the_reference_pixel() -> None:
     assert dec == pytest.approx(0.)
 
 
+def test_radec_from_uv_beyond_the_pole() -> None:
+    header = FITS_HEADER | {'CRVAL2': 89.99, 'CRPIX2': 412.5, 'CD1_1': 2.8e-4,
+                            'CD1_2': 0., 'CD2_1': 0., 'CD2_2': 2.8e-4}
+    (ra, dec) = NewHorizonsLORRI._radec_from_uv(512.5, 512.5, header)
+    assert ra == pytest.approx(237.5 + 180.)
+    assert dec == pytest.approx(90. - 0.018)
+
+
+def test_fits_geometry_with_a_path_override(tmp_path: pathlib.Path,
+                                            jupiter_path: oops.Path) -> None:
+    keywords = dict.fromkeys(('SPCSSCX', 'SPCSSCY', 'SPCSSCZ'))
+    obs = load(tmp_path, geom='fits', path='JUPITER', fits_keywords=keywords)
+    assert obs.path.path_id == 'JUPITER'
+
+
+def test_fits_pointing_with_a_frame_override(tmp_path: pathlib.Path) -> None:
+    obs = load(tmp_path, pointing='fits', frame='J2000', fits_keywords={'SPCEMEN': None})
+    assert obs.frame.frame_id == 'J2000'
+
+
+def test_fitsapp_pointing_uses_the_path_override(tmp_path: pathlib.Path,
+                                                 sun_path: oops.Path) -> None:
+    # The overriding path moves at 30 km/s, so its aberration turns the boresight; the
+    # default path from the header is at rest
+    keywords = {'SPCSSCVX': 0., 'SPCSSCVY': 0., 'SPCSSCVZ': 0.}
+    moving = oops.path.LinearPath((oops.Vector3((1.e8, 0., 0.)),
+                                   oops.Vector3((30., 0., 0.))), MIDTIME, 'SSB',
+                                  frame='J2000', path_id='MOVING')
+    fits_obs = load(tmp_path, geom='fits', pointing='fits', fits_keywords=keywords)
+    app_obs = load(tmp_path, geom='fits', pointing='fitsapp', path=moving,
+                   fits_keywords=keywords)
+    separation = boresight(app_obs).sep(boresight(fits_obs)).vals
+    assert 1.e-5 < separation < 1.e-4
+
+
 def test_fits_pointing_boresight(tmp_path: pathlib.Path) -> None:
     obs = load(tmp_path, pointing='fits')
     (ra, dec) = NewHorizonsLORRI._radec_from_uv(512.5, 512.5, FITS_HEADER)
@@ -694,6 +729,14 @@ def test_from_file_hdulist(tmp_path: pathlib.Path) -> None:
     obs = NewHorizonsLORRI.from_file(hdulist)
     assert obs.filepath == FCPath(path)
     assert np.array_equal(obs.data, np.arange(1024 * 1024).reshape(1024, 1024))
+
+
+def test_from_file_rejects_an_hdulist_of_another_instrument(
+        tmp_path: pathlib.Path) -> None:
+    hdulist = fits.open(write_fits(tmp_path / 'mvic_test.fit', INSTRU='mvi'))
+    with pytest.raises(oops.host.WrongHostError, match='not a New Horizons LORRI FITS'):
+        NewHorizonsLORRI.from_file(hdulist)
+    assert hdulist._file.closed
 
 
 def test_from_file_closes_an_hdulist(tmp_path: pathlib.Path) -> None:
