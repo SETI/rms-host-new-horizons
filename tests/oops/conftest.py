@@ -132,7 +132,7 @@ def write_label(path: pathlib.Path, image: str | None, *, lines: int | None = 10
     text += ['  LINE_SAMPLES = 1024',
              'END_OBJECT = IMAGE',
              'END', '']
-    path.write_text('\r\n'.join(text))
+    path.write_text('\r\n'.join(text), encoding='utf-8', newline='')
     return path
 
 
@@ -306,6 +306,14 @@ def reset_host() -> Any:
     NewHorizonsLORRI._reset()
     yield
     NewHorizonsLORRI._reset()
+
+
+@pytest.fixture
+def sun_path() -> oops.Path:
+    """A fixed path registered as SUN, at the Solar System barycenter."""
+
+    return oops.path.FixedPath((0., 0., 0.), oops.Path.SSB, oops.Frame.J2000,
+                               path_id='SUN')
 
 
 @pytest.fixture

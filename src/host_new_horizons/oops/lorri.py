@@ -81,6 +81,9 @@ _COMMENTARY_KEYWORDS = ('', 'COMMENT', 'HISTORY')
 # no value.
 _PDS3_METHODS = ('fast', 'strict', 'loose')
 
+# The parser's other method, which is used only when it is asked for
+_OTHER_PDS3_METHODS = ('compound',)
+
 # The PDS3 names of the metadata items that both the detached label and the FITS header
 # give, and the FITS keywords each is converted from. The detached label gives the lines
 # of the image in its IMAGE object, which keeps its own name in `dict`; LINES is the
@@ -376,9 +379,9 @@ class NewHorizonsLORRI(oops.Host):
                 then ends with the SPICE error, which begins with its short code, such as
                 "SPICE(NOFRAMECONNECT)".
             oops.host.HostFormatError: If the image is not 1024 or 256 lines, if the
-                FITS file is not valid FITS, if a PDS3 label names no FITS file, or if no
-                source read gives the start time, the exposure duration or the lines of
-                the image.
+                FITS file is not valid FITS, if a PDS3 label names no FITS file, if an
+                HDUList passed in was not read from a file, or if no source read gives
+                the start time, the exposure duration or the lines of the image.
             oops.host.PdsHostError: If no method of the PDS3 label parser can read the
                 label.
             oops.host.WrongHostError: If `fileinfo` is not a New Horizons LORRI PDS3 label
@@ -446,6 +449,11 @@ class NewHorizonsLORRI(oops.Host):
         else:
             hdulist = parsed
             if filepath is None:
+                # The path subfields name the file, so an HDUList must come from one
+                if hdulist.filename() is None:
+                    hdulist.close()
+                    raise oops.host.HostFormatError('an HDUList without a file name '
+                                                    'cannot name its image')
                 filepath = FCPath(hdulist.filename())
                 if not NewHorizonsLORRI._detect_in_fits(hdulist):
                     hdulist.close()
@@ -614,16 +622,17 @@ class NewHorizonsLORRI(oops.Host):
         Parameters:
             filepath (FCPath): The path to the label.
             pds3_options (dict[str, Any]): The options for the parser, including its
-                method. The methods after it in :data:`_PDS3_METHODS` are tried in turn
-                if it fails.
+                method. If it is one of :data:`_PDS3_METHODS`, the methods after it are
+                tried in turn if it fails; a method of :data:`_OTHER_PDS3_METHODS` is
+                tried alone.
 
         Returns:
             Pds3Label: The parsed label.
 
         Raises:
             oops.OopsValueError: If the method in `pds3_options` is not one of
-                :data:`_PDS3_METHODS`, or if another option is not one the parser
-                accepts.
+                :data:`_PDS3_METHODS` or :data:`_OTHER_PDS3_METHODS`, or if another
+                option is not one the parser accepts.
             oops.host.PdsHostError: If no method can read the label; the message gives
                 each method's error.
             oops.host.WrongHostError: If the label does not describe a New Horizons
@@ -632,12 +641,17 @@ class NewHorizonsLORRI(oops.Host):
         """
 
         first = pds3_options['method']
-        if first not in _PDS3_METHODS:
+        if first in _PDS3_METHODS:
+            methods = _PDS3_METHODS[_PDS3_METHODS.index(first):]
+        elif first in _OTHER_PDS3_METHODS:
+            methods = (first,)
+        else:
             raise oops.OopsValueError(f'invalid PDS3 parser method {first!r}; use one '
-                                      'of ' + ', '.join(repr(m) for m in _PDS3_METHODS))
+                                      'of ' + ', '.join(repr(m) for m in _PDS3_METHODS
+                                                        + _OTHER_PDS3_METHODS))
 
         errors = []
-        for method in _PDS3_METHODS[_PDS3_METHODS.index(first):]:
+        for method in methods:
             try:
                 label = Pds3Label(filepath, **(pds3_options | {'method': method}))
             except TypeError as err:
@@ -821,26 +835,29 @@ class NewHorizonsLORRI(oops.Host):
         # Define the path and frame. A default that an override replaces is not built,
         # so the header need not give its values, and the apparent pointing uses the
         # observer that the Snapshot will have. geom and pointing other than "spice"
-        # are refused before this point when the header was not read.
+        # are refused before this point when the header was not read. The header's
+        # position, velocity and pointing are those of its own mid-exposure, SPCSCET.
         if overrides['path'] is not None:
             default_path = overrides['path']
         elif geom == 'spice':
             default_path = _NewHorizons.PATH_ID
         else:
             default_path = NewHorizonsLORRI._fits_path_from_header(header, filepath,
-                                                                   tdb_midtime)
+                                                                   header['SPCSCET'])
 
         using_cks = overrides['frame'] is None and pointing == 'spice'
         if overrides['frame'] is not None:
             default_frame = overrides['frame']
         elif pointing == 'spice':
             NewHorizonsLORRI._define_camera_frame()
-            NewHorizonsLORRI._check_pointing(tdb_midtime, filepath)
+            check_time = (tdb_midtime if overrides['cadence'] is None
+                          else overrides['cadence'].midtime)
+            NewHorizonsLORRI._check_pointing(check_time, filepath)
             default_frame = _SPICE_FRAME_NAME
         else:
             default_frame = NewHorizonsLORRI._fits_frame_from_header(
                 header, filepath, pointing=pointing, path=default_path,
-                tdb_midtime=tdb_midtime)
+                tdb_midtime=header['SPCSCET'])
 
         # Define the Snapshot parameters
         params = {
@@ -864,17 +881,18 @@ class NewHorizonsLORRI(oops.Host):
             obs.insert_subfields(arrays)
 
         # The merged items under their PDS3 names, then every other key of each source
+        # without missing values. A null in one source never hides the other's value.
         dict_ = {}
         if label_dict is not None:
-            dict_.update(label_dict)
+            dict_.update({key: value for (key, value) in label_dict.items()
+                          if not NewHorizonsLORRI._is_missing(value)})
         if header_dict is not None:
             # NAXIS2 stays, because LINES is not a key of `dict`
             converted = {keyword for (name, keywords) in _FITS_ITEM_KEYWORDS.items()
                          if name != 'LINES' for keyword in keywords}
             dict_.update({key: value for (key, value) in header_dict.items()
-                          if key not in converted and key not in dict_})
-        dict_ = {key: value for (key, value) in dict_.items()
-                 if not NewHorizonsLORRI._is_null(value)}
+                          if key not in converted and key not in dict_
+                          and not NewHorizonsLORRI._is_missing(value)})
         dict_.update(NewHorizonsLORRI._dict_items(items))
 
         obs.insert_subfield('dict', dict_)
@@ -989,17 +1007,19 @@ class NewHorizonsLORRI(oops.Host):
                                             f'LORRI image {source}')
 
     @staticmethod
-    def _is_null(value):
-        """True if a value is a string that means the item is missing.
+    def _is_missing(value):
+        """True if a value means the item is missing.
 
         Parameters:
             value (Any): The value.
 
         Returns:
-            bool: True if `value` is one of :data:`_NULL_VALUES`, ignoring case and
-            surrounding blanks.
+            bool: True if `value` is None, as for an undefined FITS card, or one of
+            :data:`_NULL_VALUES`, ignoring case and surrounding blanks.
         """
 
+        if value is None:
+            return True
         return isinstance(value, str) and value.strip().upper() in _NULL_VALUES
 
     @staticmethod
@@ -1018,7 +1038,7 @@ class NewHorizonsLORRI(oops.Host):
         """
 
         values = {key: dict_[key] for key in _FITS_ITEM_KEYWORDS
-                  if key in dict_ and not NewHorizonsLORRI._is_null(dict_[key])}
+                  if key in dict_ and not NewHorizonsLORRI._is_missing(dict_[key])}
 
         items = {}
         if 'START_TIME' in values:
@@ -1057,13 +1077,13 @@ class NewHorizonsLORRI(oops.Host):
         Returns:
             dict[str, Any]: The items as for :meth:`_items_from_pds3`, converted from the
             keywords of :data:`_FITS_ITEM_KEYWORDS`, and LINES, the lines of the image.
-            An item other than LINES is left out if a keyword it needs is missing or
-            counts as missing.
+            An item is left out if a keyword it needs is missing, undefined, or counts
+            as missing.
         """
 
         def given(keyword):
             return (keyword in header_dict
-                    and not NewHorizonsLORRI._is_null(header_dict[keyword]))
+                    and not NewHorizonsLORRI._is_missing(header_dict[keyword]))
 
         items = {}
         if given('EXPTIME'):
@@ -1077,7 +1097,8 @@ class NewHorizonsLORRI(oops.Host):
         if given('STOPMET'):
             items['SPACECRAFT_CLOCK_STOP_COUNT'] = NewHorizonsLORRI._sclk_from_met(
                 header_dict['STOPMET'])
-        items['LINES'] = header_dict['NAXIS2']
+        if given('NAXIS2'):
+            items['LINES'] = header_dict['NAXIS2']
 
         return items
 

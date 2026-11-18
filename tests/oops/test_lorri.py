@@ -494,14 +494,6 @@ def test_from_file_timeshift(tmp_path: pathlib.Path) -> None:
 ##########################################################################################
 
 
-@pytest.fixture
-def sun_path() -> oops.Path:
-    """A fixed path registered as SUN, at the Solar System barycenter."""
-
-    return oops.path.FixedPath((0., 0., 0.), oops.Path.SSB, oops.Frame.J2000,
-                               path_id='SUN')
-
-
 def test_fits_geometry_position(tmp_path: pathlib.Path, sun_path: oops.Path) -> None:
     obs = load(tmp_path, geom='fits')
     event = obs.path.wrt('SUN').event_at_time(obs.midtime)
@@ -720,7 +712,7 @@ def test_from_file_label_astrometry_values(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', lines=256)
     obs = NewHorizonsLORRI.from_file(label, astrometry=True)
     tstart = julian.tdb_from_tai(julian.tai_from_iso('2007-01-10T05:41:08.363'))
-    assert obs.time == pytest.approx((tstart, tstart + 5.))
+    assert obs.time == pytest.approx((tstart, tstart + 5.), abs=1.e-6)
     assert obs.binning_mode == '4X4'
     assert obs.fov is NewHorizonsLORRI._FOVS['4X4', 'fast']
     assert obs.label_target == 'JUPITER'

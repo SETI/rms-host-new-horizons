@@ -10,6 +10,7 @@ from typing import Any
 import julian
 import oops
 import pytest
+from astropy.io import fits
 from conftest import FITS_HEADER, write_fits, write_label
 from filecache import FCPath
 from pdsparser import Pds3Label
@@ -35,10 +36,10 @@ def label_and_fits(tmp_path: pathlib.Path, *, fits_keywords: dict[str, Any] | No
                        **label_keywords)
 
 
-def from_label(tmp_path: pathlib.Path, **kwargs: Any) -> Any:
+def from_label(tmp_path: pathlib.Path, *, geom: str = 'spice', **kwargs: Any) -> Any:
     """The Snapshot of a full read of a label written by label_and_fits()."""
 
-    return NewHorizonsLORRI.from_file(label_and_fits(tmp_path, **kwargs))
+    return NewHorizonsLORRI.from_file(label_and_fits(tmp_path, **kwargs), geom=geom)
 
 ##########################################################################################
 # What each input reads
@@ -99,6 +100,23 @@ def test_parsed_label_of_another_instrument(tmp_path: pathlib.Path) -> None:
                                   INSTRUMENT_ID='"MVIC"'))
     with pytest.raises(oops.host.WrongHostError, match='not a New Horizons LORRI PDS3'):
         NewHorizonsLORRI.from_file(label)
+
+
+def test_hdulist_without_a_file(tmp_path: pathlib.Path) -> None:
+    with fits.open(write_fits(tmp_path / 'lor_test.fit')) as hdulist:
+        in_memory = fits.HDUList([hdu.copy() for hdu in hdulist])
+    with pytest.raises(oops.host.HostFormatError, match='HDUList without a file name'):
+        NewHorizonsLORRI.from_file(in_memory)
+
+
+def test_fits_file_without_image_lines(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / 'lor_test.fit'
+    primary = fits.PrimaryHDU()
+    for (key, value) in FITS_HEADER.items():
+        primary.header[key] = value
+    primary.writeto(path)
+    with pytest.raises(oops.host.HostFormatError, match='no lines of the image'):
+        NewHorizonsLORRI.from_file(path, astrometry=True)
 
 
 def test_parsed_object_of_another_kind() -> None:
@@ -174,7 +192,8 @@ def test_lines_rule(tmp_path: pathlib.Path) -> None:
 def test_item_missing_from_the_label_comes_from_the_header(
         tmp_path: pathlib.Path, keyword: str, subfield: str, value: str,
         label_value: str | None) -> None:
-    obs = from_label(tmp_path, **{keyword: label_value})
+    keywords: dict[str, Any] = {keyword: label_value}
+    obs = from_label(tmp_path, **keywords)
     assert obs.subfields[subfield] == value
 
 
@@ -200,6 +219,30 @@ def test_item_missing_from_both_sources_is_absent(tmp_path: pathlib.Path) -> Non
                      fits_keywords={'STOPMET': None})
     assert 'spacecraft_clock_stop_count' not in obs.subfields
     assert 'SPACECRAFT_CLOCK_STOP_COUNT' not in obs.dict
+
+
+def test_null_in_the_label_does_not_hide_the_header_value(
+        tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path, MISSION='"N/A"')
+    assert obs.dict['MISSION'] == 'New Horizons'
+
+
+def test_undefined_header_card_counts_as_missing(tmp_path: pathlib.Path) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    with fits.open(path, mode='update') as hdulist:
+        hdulist[0].header['EXPTIME'] = None
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
+    obs = NewHorizonsLORRI.from_file(label)
+    assert obs.texp == 5.0
+    assert obs.time[0] == pytest.approx(LABEL_START, abs=1.e-6)
+
+
+def test_fits_geometry_uses_the_header_epoch(tmp_path: pathlib.Path,
+                                             sun_path: oops.Path) -> None:
+    obs = from_label(tmp_path, START_TIME='2007-01-10T05:41:10.363', geom='fits')
+    event = obs.path.wrt('SUN').event_at_time(FITS_HEADER['SPCSCET'])
+    assert obs.time[0] == pytest.approx(LABEL_START + 2., abs=1.e-6)
+    assert event.pos.vals == pytest.approx([-1.e8, -2.e8, -3.e8])
 
 
 def test_null_values_stay_in_the_raw_dicts(tmp_path: pathlib.Path) -> None:
@@ -245,15 +288,34 @@ def test_label_astrometry_without_a_needed_item(tmp_path: pathlib.Path,
 
 # "fast" rejects a quoted value that starts at the beginning of the next line; "strict"
 # rejects a set of unquoted words with a blank inside, which "loose" accepts
-@pytest.mark.parametrize('extra', [
-    ('NOTE =', '"a note that starts', 'on the next line"'),
-    ('NOTE =', '"a note that starts', 'on the next line"', 'WORDS = {a, b c}'),
+NOTE = ('NOTE =', '"a note that starts', 'on the next line"')
+
+
+@pytest.mark.parametrize(('extra', 'expected'), [
+    (NOTE, {'NOTE': 'a note that starts\non the next line'}),
+    (NOTE + ('WORDS = {a, b c}',), {'NOTE': 'a note that starts\non the next line',
+                                    'WORDS': {'a', 'b', 'c'}}),
 ])
-def test_label_parser_falls_back(tmp_path: pathlib.Path, extra: tuple[str, ...]) -> None:
+def test_label_parser_falls_back(tmp_path: pathlib.Path, extra: tuple[str, ...],
+                                 expected: dict[str, Any]) -> None:
     write_fits(tmp_path / 'lor_test.fit')
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', extra=extra)
     obs = NewHorizonsLORRI.from_file(label)
-    assert obs.basename == 'lor_test.fit'
+    assert {key: obs.label_dict[key] for key in expected} == expected
+
+
+def test_label_parser_compound_method(tmp_path: pathlib.Path) -> None:
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
+    obs = NewHorizonsLORRI.from_file(label, astrometry=True,
+                                     pds3_options={'method': 'compound'})
+    assert obs.label_target == 'JUPITER'
+
+
+def test_label_parser_compound_method_is_tried_alone(tmp_path: pathlib.Path) -> None:
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', START_TIME='"x')
+    with pytest.raises(oops.host.PdsHostError, match=r'method compound: [^;]*$'):
+        NewHorizonsLORRI.from_file(label, astrometry=True,
+                                   pds3_options={'method': 'compound'})
 
 
 def test_label_parser_starts_at_the_given_method(tmp_path: pathlib.Path) -> None:
@@ -313,6 +375,16 @@ def test_other_pointing_errors_pass_through(tmp_path: pathlib.Path,
     no_pointing(monkeypatch, 'something else')
     with pytest.raises(RuntimeError, match='something else'):
         NewHorizonsLORRI.from_file(path)
+
+
+def test_pointing_is_checked_at_the_cadence_override(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    times = []
+    monkeypatch.setattr(NewHorizonsLORRI, '_check_pointing',
+                        staticmethod(lambda tdb, filepath: times.append(tdb)))
+    cadence = oops.cadence.SnapCadence(1000., 10.)
+    NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), cadence=cadence)
+    assert times == [1005.]
 
 
 @pytest.mark.parametrize('options', [{'frame': 'J2000'}, {'pointing': 'fits'}])

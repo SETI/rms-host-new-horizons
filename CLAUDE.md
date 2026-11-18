@@ -90,8 +90,9 @@ described below.
   mid-exposure (`_check_pointing()`) and raises `HostError` with the SPICE error code if
   the kernels give none. `from_index()` does not, so that one image without pointing does
   not stop the whole index.
-- `from_index()` reads the team's volume index with the supplement beside it, which must
-  exist. `_read_index_and_supplement()` matches rows on `VOLUME_ID` and
+- `from_index()` reads the team's volume index with its supplement: the one named by
+  `supplement`, or else the one beside the index, which must then exist. Given
+  `row_dicts`, it reads neither. `_read_index_and_supplement()` matches rows on `VOLUME_ID` and
   `FILE_SPECIFICATION_NAME` in any order (the NHJULO_1001 supplement lists two rows out of
   the index's order), and the supplement, which follows the labels, wins every shared
   column (the index gives clock counts with a partition and rounds the stop count
