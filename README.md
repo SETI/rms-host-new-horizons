@@ -79,7 +79,9 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
   image. Every value comes from the FITS file, so the FITS file and its PDS3 label give
   the same `Snapshot`, and its path names the FITS file either way. The image array is
   the one the file stores; a calibrated image also carries its error estimates and
-  quality flags. `astrometry=True` reads no image data.
+  quality flags. `astrometry=True` reads no image data, and given a PDS3 label it reads
+  the label alone, without the FITS file; the times are then the label's, given to the
+  millisecond.
 - The exposure is centered on the middle of the exposure that the FITS header gives. The
   spacecraft clock counts at the start and end of the exposure are given as they appear
   in the PDS3 label.

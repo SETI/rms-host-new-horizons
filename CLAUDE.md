@@ -73,6 +73,13 @@ described below.
   (`_open_fits()`), because `oops.Host._read_fileinfo()` leaves a FITS file of another
   host open, and closes every HDUList once the arrays and headers are copied out of it,
   including one passed in.
+- Hosts read only what they need (operator ruling, 2026-11-17). A FITS input never reads
+  the detached label. A label input opens the FITS file for the pixels and the header in a
+  full read, but an astrometry read of a label (`_snapshot_from_label()`) reads the label
+  alone and needs no FITS file: its times come from START_TIME and EXPOSURE_DURATION, its
+  target from TARGET_NAME and its clock counts from the label, the FITS-only `headers` is
+  absent, and `geom` or `pointing` from the header is refused. The C1 equality of the two
+  inputs holds for full reads. Labels and index rows share `_snapshot_from_dict()`.
 - The clock counts come from the FITS header: `SPCSCLK0` for the start and `STOPMET`,
   converted by `_sclk_from_met()`, for the end. Both match the PDS3 label's spelling on
   every archive product checked.
