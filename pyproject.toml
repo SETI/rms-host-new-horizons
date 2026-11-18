@@ -144,7 +144,8 @@ ignore_missing_imports = true
 #     attached at runtime by insert_subfield(), so no declaration of them can exist.
 #   - The oops stub declares oops.host.Host but not its re-export as oops.Host.
 [[tool.mypy.overrides]]
-module = ["conftest", "test_new_horizons", "test_lorri", "test_lorri_files"]
+module = ["conftest", "test_new_horizons", "test_lorri", "test_lorri_files",
+          "test_lorri_merge"]
 disable_error_code = ["attr-defined"]
 
 [tool.ruff]

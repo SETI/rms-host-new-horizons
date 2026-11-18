@@ -19,7 +19,6 @@ from pdsparser import Pds3Label
 
 import host_new_horizons
 import host_new_horizons.oops
-from host_new_horizons.oops import lorri as lorri_module
 from host_new_horizons.oops.lorri import NewHorizonsLORRI
 
 INDEX = TEST_FILES / 'NHJULO_2001_index_edited.lbl'
@@ -309,8 +308,8 @@ def test_from_file_raw_product(tmp_path: pathlib.Path) -> None:
                       calibrated=False)
     obs = NewHorizonsLORRI.from_file(path)
     assert obs.data.shape == (256, 257)
-    assert obs.error is None
-    assert obs.quality is None
+    assert 'error' not in obs.subfields
+    assert 'quality' not in obs.subfields
 
 
 def test_from_file_astrometry(tmp_path: pathlib.Path) -> None:
@@ -321,15 +320,42 @@ def test_from_file_astrometry(tmp_path: pathlib.Path) -> None:
     assert obs.headers[0]['SPCCBTNM'] == 'JUPITER'
 
 
-def test_from_file_dict_is_the_primary_header(tmp_path: pathlib.Path) -> None:
+def test_from_file_header_dict_is_the_primary_header(tmp_path: pathlib.Path) -> None:
     path = write_fits(tmp_path / 'lor_test.fit')
     with fits.open(path, mode='update') as hdulist:
         hdulist[0].header['COMMENT'] = 'a comment'
         hdulist[0].header['HISTORY'] = 'a history'
     obs = NewHorizonsLORRI.from_file(path)
-    assert obs.dict['SPCCBTNM'] == 'JUPITER'
-    assert 'COMMENT' not in obs.dict
-    assert 'HISTORY' not in obs.dict
+    assert obs.header_dict['SPCCBTNM'] == 'JUPITER'
+    assert 'COMMENT' not in obs.header_dict
+    assert 'HISTORY' not in obs.header_dict
+
+
+@pytest.mark.parametrize(('key', 'value'), [
+    ('START_TIME', '2007-01-10T05:41:08.363'),
+    ('EXPOSURE_DURATION', 5.0),
+    ('TARGET_NAME', 'JUPITER'),
+    ('SPACECRAFT_CLOCK_START_COUNT', '0030713585:49000'),
+    ('SPACECRAFT_CLOCK_STOP_COUNT', '0030713590:49000'),
+    ('NAXIS2', 1024),
+    ('MISSION', 'New Horizons'),
+])
+def test_from_file_dict_gives_pds3_names(tmp_path: pathlib.Path, key: str,
+                                         value: Any) -> None:
+    assert load(tmp_path).dict[key] == value
+
+
+@pytest.mark.parametrize('keyword', ['SPCSCET', 'EXPTIME', 'SPCCBTNM', 'SPCSCLK0',
+                                     'STOPMET', 'COMMENT'])
+def test_from_file_dict_leaves_out_converted_keywords(tmp_path: pathlib.Path,
+                                                      keyword: str) -> None:
+    assert keyword not in load(tmp_path).dict
+
+
+def test_from_file_dict_leaves_out_null_values(tmp_path: pathlib.Path) -> None:
+    obs = load(tmp_path, fits_keywords={'CB3LOAD': '---'})
+    assert 'CB3LOAD' not in obs.dict
+    assert obs.header_dict['CB3LOAD'] == '---'
 
 
 def test_from_file_headers(tmp_path: pathlib.Path) -> None:
@@ -349,8 +375,6 @@ def test_from_file_subfields(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize(('label_target', 'target'), [
-    ('---', 'NONE'),
-    ('N/A', 'NONE'),
     ('PLUTO', 'PLUTO'),
     ('PLUTO-CHARON', 'PLUTO'),
     ('CHARON', 'CHARON'),
@@ -361,20 +385,29 @@ def test_from_file_target(tmp_path: pathlib.Path, label_target: str, target: str
     assert obs.label_target == label_target
 
 
+@pytest.mark.parametrize('null', ['---', 'N/A', 'UNK', 'NULL'])
+def test_from_file_null_target(tmp_path: pathlib.Path, null: str) -> None:
+    obs = load(tmp_path, fits_keywords={'SPCCBTNM': null})
+    assert obs.target == 'NONE'
+    assert 'label_target' not in obs.subfields
+    assert 'TARGET_NAME' not in obs.dict
+
+
 def test_from_file_clock_counts(tmp_path: pathlib.Path) -> None:
-    obs = load(tmp_path)
+    obs = load(tmp_path, fits_keywords={'STOPMET': 30713586.48})
     assert obs.spacecraft_clock_start_count == '0030713585:49000'
     assert obs.spacecraft_clock_stop_count == '0030713586:24000'
 
 
-@pytest.mark.parametrize(('keyword', 'subfield'), [
-    ('SPCSCLK0', 'spacecraft_clock_start_count'),
-    ('STOPMET', 'spacecraft_clock_stop_count'),
+@pytest.mark.parametrize(('keyword', 'subfield', 'key'), [
+    ('SPCSCLK0', 'spacecraft_clock_start_count', 'SPACECRAFT_CLOCK_START_COUNT'),
+    ('STOPMET', 'spacecraft_clock_stop_count', 'SPACECRAFT_CLOCK_STOP_COUNT'),
 ])
 def test_from_file_missing_clock_count(tmp_path: pathlib.Path, keyword: str,
-                                       subfield: str) -> None:
+                                       subfield: str, key: str) -> None:
     obs = load(tmp_path, fits_keywords={keyword: None})
-    assert obs.subfields[subfield] is None
+    assert subfield not in obs.subfields
+    assert key not in obs.dict
 
 
 @pytest.mark.parametrize(('met', 'count'), [
@@ -661,7 +694,8 @@ def test_from_file_label_without_an_image(tmp_path: pathlib.Path) -> None:
 
 
 def test_from_file_label_of_another_instrument(tmp_path: pathlib.Path) -> None:
-    label = write_label(tmp_path / 'mvic_test.lbl', 'MVIC_TEST.FIT', instrument='MVIC')
+    label = write_label(tmp_path / 'mvic_test.lbl', 'MVIC_TEST.FIT',
+                        INSTRUMENT_ID='"MVIC"')
     with pytest.raises(oops.host.WrongHostError, match='not a New Horizons LORRI PDS3'):
         NewHorizonsLORRI.from_file(label)
 
@@ -678,7 +712,7 @@ def test_from_file_label_astrometry_reads_no_fits_file(tmp_path: pathlib.Path) -
     write_fits(tmp_path / 'lor_test.fit', SPCCBTNM='EUROPA', EXPTIME=0.1)
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
     obs = NewHorizonsLORRI.from_file(label, astrometry=True)
-    assert obs.target == 'J17 CALLIRRHOE'
+    assert obs.target == 'JUPITER'
     assert obs.texp == 5.
 
 
@@ -689,7 +723,7 @@ def test_from_file_label_astrometry_values(tmp_path: pathlib.Path) -> None:
     assert obs.time == pytest.approx((tstart, tstart + 5.))
     assert obs.binning_mode == '4X4'
     assert obs.fov is NewHorizonsLORRI._FOVS['4X4', 'fast']
-    assert obs.label_target == 'J17 CALLIRRHOE'
+    assert obs.label_target == 'JUPITER'
     assert obs.spacecraft_clock_start_count == '0030713585:49000'
     assert obs.spacecraft_clock_stop_count == '0030713590:49000'
     assert obs.dict['INSTRUMENT_ID'] == 'LORRI'
@@ -697,7 +731,8 @@ def test_from_file_label_astrometry_values(tmp_path: pathlib.Path) -> None:
 
 
 def test_from_file_label_astrometry_target(tmp_path: pathlib.Path) -> None:
-    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', target='CALIBRATION')
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT',
+                        TARGET_NAME='"CALIBRATION"')
     obs = NewHorizonsLORRI.from_file(label, astrometry=True)
     assert obs.target == 'NONE'
 
@@ -715,7 +750,7 @@ def test_from_file_label_astrometry_rejects_fits_geometry(
         tmp_path: pathlib.Path, option: str, value: str) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
     options: dict[str, Any] = {option: value}
-    with pytest.raises(oops.OopsValueError, match='need the FITS file'):
+    with pytest.raises(oops.host.HostError, match='need the FITS file'):
         NewHorizonsLORRI.from_file(label, astrometry=True, **options)
 
 ##########################################################################################
@@ -855,7 +890,46 @@ def test_from_index_rejects_a_mismatched_supplement(tmp_path: pathlib.Path) -> N
     content = table.read_bytes()
     table.write_bytes(content.replace(b'lor_0030713591_0x633', b'lor_0030713591_0x999'))
     with pytest.raises(oops.host.HostIndexError,
-                       match='FILE_SPECIFICATION_NAME value mismatch'):
+                       match=r"index files list different images: .*only in the index: "
+                             r"\[\('NHJULO_2001', 'data/20070110_003071/"
+                             r"lor_0030713591_0x633_sci.lbl'\)\]"):
+        NewHorizonsLORRI.from_index(index)
+
+
+def rewrite_supplement_rows(tmp_path: pathlib.Path, edit: Any) -> pathlib.Path:
+    """Copy the index into `tmp_path`, apply `edit` to the list of the supplement's rows
+    as bytes, and return the index label."""
+
+    index = copy_index(tmp_path)
+    table = tmp_path / 'NHJULO_2001_supplemental_index_edited.tab'
+    rows = table.read_bytes().splitlines(keepends=True)
+    table.write_bytes(b''.join(edit(rows)))
+    return index
+
+
+def test_from_index_matches_supplement_rows_in_another_order(
+        tmp_path: pathlib.Path) -> None:
+    index = rewrite_supplement_rows(tmp_path, lambda rows: rows[::-1])
+    in_order = NewHorizonsLORRI.from_index(INDEX)
+    reordered = NewHorizonsLORRI.from_index(index)
+    assert [obs.dict for obs in reordered] == [obs.dict for obs in in_order]
+
+
+def test_from_index_rejects_a_supplement_row_given_twice(tmp_path: pathlib.Path) -> None:
+    index = rewrite_supplement_rows(tmp_path, lambda rows: rows[:-1] + rows[:1])
+    with pytest.raises(oops.host.HostIndexError,
+                       match=r"supplemental index lists \('NHJULO_2001', "
+                             r"'data/20070110_003070/lor_0030702839_0x630_sci.lbl'\) "
+                             r"twice"):
+        NewHorizonsLORRI.from_index(index)
+
+
+def test_from_index_rejects_an_index_row_given_twice(tmp_path: pathlib.Path) -> None:
+    index = copy_index(tmp_path)
+    table = tmp_path / 'NHJULO_2001_index_edited.tab'
+    rows = table.read_bytes().splitlines(keepends=True)
+    table.write_bytes(b''.join(rows[:-1] + rows[:1]))
+    with pytest.raises(oops.host.HostIndexError, match='index lists an image twice'):
         NewHorizonsLORRI.from_index(index)
 
 
@@ -924,12 +998,30 @@ def test_from_index_custom_frame_reports_no_cks(fake_spice: FakeSpice,
     assert 'CK' not in fake_spicedb.named('used_basenames')[0][1]['types']
 
 
-def test_match_index_rows_copies_the_supplement() -> None:
-    index_row = {'VOLUME_ID': 'V', 'FILE_SPECIFICATION_NAME': 'F',
-                 'COUNT': '1/0001:00000'}
-    supplement_row = {'VOLUME_ID': 'V', 'FILE_SPECIFICATION_NAME': 'F',
-                      'COUNT': '0001:00000'}
-    assert lorri_module.NewHorizonsLORRI._match_index_rows(index_row, supplement_row)
-    assert index_row['COUNT'] == '0001:00000'
+@pytest.mark.parametrize('null', ['N/A', 'UNK'])
+def test_from_index_row_null_values(null: str) -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(
+        TARGET_NAME=null, SPACECRAFT_CLOCK_START_COUNT=null)])
+    assert obs.target == 'NONE'
+    assert 'label_target' not in obs.subfields
+    assert 'spacecraft_clock_start_count' not in obs.subfields
+
+
+@pytest.mark.parametrize('column', ['START_TIME', 'EXPOSURE_DURATION'])
+def test_from_index_row_without_a_needed_column(column: str) -> None:
+    row_dict = row()
+    del row_dict[column]
+    with pytest.raises(oops.host.HostFormatError,
+                       match=f'no {column} for LORRI image NHJULO_2001/data/'):
+        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+
+
+@pytest.mark.parametrize(('column', 'value'), [
+    ('START_TIME', '2007-01-10T25:41:08'),
+    ('EXPOSURE_DURATION', 'five seconds'),
+])
+def test_from_index_row_with_an_invalid_value(column: str, value: str) -> None:
+    with pytest.raises(oops.host.HostFormatError, match=f'no {column} for LORRI image'):
+        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(**{column: value})])
 
 ##########################################################################################

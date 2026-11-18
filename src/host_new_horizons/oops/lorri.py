@@ -7,11 +7,12 @@ import pathlib
 
 import numpy as np
 
+import cspyce
 import julian
 
 from astropy.io import fits as pyfits
 from filecache  import FCPath
-from pdsparser  import Pds3Label
+from pdsparser  import Pds3Label, PdsError
 
 import oops
 from ._new_horizons import _NewHorizons
@@ -56,18 +57,123 @@ _FITS90_LAST_YEAR = 2012
 _ERROR_EXTNAME = 'LORRI ERROR IMAGE'
 _QUALITY_EXTNAME = 'LORRI QUALITY FLAG IMAGE'
 
-# The target names of an image that has no target. The calibration images of the launch
-# phase give "---" in the FITS header and "CALIBRATION" in the label and index.
-_NO_TARGET_NAMES = ('---', 'N/A', 'CALIBRATION')
+# The target name of the calibration images of the launch phase in the label and index,
+# which means the image has no target. Their FITS header gives "---", a null value.
+_NO_TARGET_NAMES = ('CALIBRATION',)
+
+# Values that mean a metadata item is missing: the PDS3 null constants, and "---", which
+# the FITS header writes for a body it does not name. They still appear in `label_dict`
+# and `header_dict`, but nowhere else.
+_NULL_VALUES = ('UNK', 'N/A', 'NULL', '---')
 
 # The ticks of the New Horizons spacecraft clock per second
 _SCLK_TICKS = 50000
 
 # The columns that identify the same image in an index and its supplement
-_INDEX_KEYS = ['VOLUME_ID', 'FILE_SPECIFICATION_NAME']
+_INDEX_KEYS = ('VOLUME_ID', 'FILE_SPECIFICATION_NAME')
 
-# FITS header keywords that only carry text, left out of the `dict` subfield
+# FITS header keywords that only carry text, left out of `header_dict` and `dict`
 _COMMENTARY_KEYWORDS = ('', 'COMMENT', 'HISTORY')
+
+# The PDS3 label parser's methods, in the order they are tried. "fast" rejects some valid
+# labels, such as a quoted value that starts at the beginning of the next line; "strict"
+# reads every valid label; "loose" also accepts some invalid ones, such as a keyword with
+# no value.
+_PDS3_METHODS = ('fast', 'strict', 'loose')
+
+# The PDS3 names of the metadata items that both the detached label and the FITS header
+# give, and the FITS keywords each is converted from. The detached label gives the lines
+# of the image in its IMAGE object, which keeps its own name in `dict`; LINES is the
+# item's name only inside the host.
+_FITS_ITEM_KEYWORDS = {
+    'START_TIME'                  : ('SPCSCET', 'EXPTIME'),
+    'EXPOSURE_DURATION'           : ('EXPTIME',),
+    'TARGET_NAME'                 : ('SPCCBTNM',),
+    'SPACECRAFT_CLOCK_START_COUNT': ('SPCSCLK0',),
+    'SPACECRAFT_CLOCK_STOP_COUNT' : ('STOPMET',),
+    'LINES'                       : ('NAXIS2',),
+}
+
+# The precision of the detached label's START_TIME (milliseconds) and EXPOSURE_DURATION.
+# Within half of it, the label's value is the FITS header's value rounded.
+_TIME_DIGITS = 3
+_LABEL_ROUNDING = 0.5e-3 + 1.e-6        # seconds, with room for floating-point error
+
+##########################################################################################
+# The resolution rules. Where the detached label and the FITS header both give an item
+# and the values differ, the rule for that item picks one. Evidence: a survey of the
+# label and header of 7,897 products, a random sample of all 14 volumes (2026-11-18);
+# each issue gives the counts and examples, and #13 lists the items only one source has.
+##########################################################################################
+
+
+def _rounded_label_loses(label_value, fits_value):
+    """The FITS header's value if the label's is the same number rounded; otherwise the
+    label's."""
+
+    if abs(label_value - fits_value) <= _LABEL_ROUNDING:
+        return fits_value
+    return label_value
+
+
+def _label_wins(label_value, fits_value):
+    """The detached label's value, the default rule."""
+
+    return label_value
+
+
+def _fits_wins(label_value, fits_value):
+    """The FITS header's value."""
+
+    return fits_value
+
+
+def _is_spice_body(name):
+    """True if the kernel pool knows `name` as the name of a body."""
+
+    try:
+        cspyce.bodn2c(name)
+    except (KeyError, ValueError):
+        return False
+    return True
+
+
+def _spice_body_wins(label_value, fits_value):
+    """The FITS header's value if it names a body that SPICE knows and the label's does
+    not; otherwise the label's."""
+
+    if _is_spice_body(fits_value) and not _is_spice_body(label_value):
+        return fits_value
+    return label_value
+
+
+_RESOLUTION_RULES = {
+    # START_TIME: the label writes the FITS header's start (SPCSCET - EXPTIME/2) rounded
+    # to the millisecond on all 7,897 products surveyed; the header's value is the
+    # precise one (#11).
+    'START_TIME': _rounded_label_loses,
+
+    # EXPOSURE_DURATION: equal on 7,170 products; on the other 727 they differ only in
+    # the last bit of the header's binary value, 9.9676 against 9.967600000000001 (#12).
+    'EXPOSURE_DURATION': _rounded_label_loses,
+
+    # TARGET_NAME: both give a name and they differ on 1,005 products, and neither source
+    # is consistently the better one. The label writes a catalog name ("J1 IO", "J17
+    # CALLIRRHOE") where the header writes the SPICE name ("IO") on 100; the header writes
+    # a pointing ("RADEC=270.66,-14.63=P4") or a misspelling ("FJUPITER") where the label
+    # names the body ("KERBEROS", "JUPITER") on 93; on 807 SPICE knows neither name. The
+    # target body must be one that SPICE knows, so a name it knows wins; otherwise the
+    # label's, the default (#10).
+    'TARGET_NAME': _spice_body_wins,
+
+    # The clock counts agree on all 7,897 products surveyed, so the default applies.
+    'SPACECRAFT_CLOCK_START_COUNT': _label_wins,
+    'SPACECRAFT_CLOCK_STOP_COUNT' : _label_wins,
+
+    # LINES: they agree on all 7,897 products surveyed. The header describes the array
+    # that `data` holds, which the field of view must match.
+    'LINES': _fits_wins,
+}
 
 ##########################################################################################
 # The distortion model of
@@ -131,22 +237,46 @@ class NewHorizonsLORRI(oops.Host):
                   timeshift=None, navigation=None, tracker=None, parallel=None, **kwargs):
         """A Snapshot object based on a given New Horizons LORRI image file.
 
-        Every value comes from the FITS file. Given a PDS3 label, the host reads the FITS
-        file that the label's ``^IMAGE`` pointer names, so the label and its FITS file
-        give the same Snapshot. A FITS file is read without its label.
+        What is read depends on the input:
 
-        The exception is an astrometry read of a PDS3 label, which reads the label alone
-        and needs no FITS file. Its times come from the label's START_TIME and
-        EXPOSURE_DURATION, which give the exposure to the millisecond; its binning mode
-        from the lines of the IMAGE object; its target from TARGET_NAME, repaired as
-        described below; and its clock counts from the label. It has no `headers`
-        subfield, `dict` is the label, and `geom` and `pointing` must be "spice".
+        - A FITS file: the FITS file alone, with its pixels unless `astrometry` is True.
+        - A PDS3 label: the label, and the FITS file that its ``^IMAGE`` pointer names
+          (in the label's directory, in the case of the label's own name first), with
+          its pixels. With `astrometry`, the label alone; the FITS file need not exist.
+
+        The metadata come from whichever of the two was read: the detached label, and
+        the label attached to the image, which is the FITS header. Each item of the FITS
+        header is converted to the name and form that the PDS3 label gives it:
+
+        - START_TIME, the start of the exposure: SPCSCET, the middle of the exposure,
+          less half of EXPTIME.
+        - EXPOSURE_DURATION: EXPTIME.
+        - TARGET_NAME: SPCCBTNM.
+        - SPACECRAFT_CLOCK_START_COUNT: SPCSCLK0.
+        - SPACECRAFT_CLOCK_STOP_COUNT: STOPMET, a count of seconds, converted to the
+          form "SSSSSSSSSS:TTTTT" (ten digits of seconds and five of the 1/50000-second
+          ticks).
+        - The lines of the image: NAXIS2, the LINES of the label's IMAGE object.
+
+        A value of "UNK", "N/A", "NULL" or "---" counts as missing. Where only one source
+        gives an item, its value is used. Where both give it and the values differ, a
+        rule for each item chooses:
+
+        - START_TIME and EXPOSURE_DURATION: the FITS header's if the label's is the
+          same value rounded to the millisecond; otherwise the label's.
+        - TARGET_NAME: the one that the SPICE kernel pool knows as a body, if only one
+          is, as with the header's "CALLIRRHOE" rather than the label's "J17
+          CALLIRRHOE", or the label's "KERBEROS" rather than the header's
+          "RADEC=270.66,-14.63=P4"; otherwise the label's.
+        - The lines of the image: the FITS header's, which describe the array in `data`.
+        - The clock counts: the label's.
 
         Parameters:
             fileinfo (str | pathlib.Path | FCPath | Pds3Label | HDUList): The path to the
                 FITS file or its PDS3 label, or its parsed content as a Pds3Label or an
-                HDUList. The FITS file is closed once it has been read, including an
-                HDUList that was passed in.
+                HDUList, which is read as the label or the FITS file would be. The FITS
+                file is closed once it has been read, including an HDUList that was
+                passed in.
             geom (str, optional): "spice" to take the spacecraft's position from the SP
                 kernels; "fits" to take it from the FITS header, as a linear path relative
                 to the Sun.
@@ -160,7 +290,9 @@ class NewHorizonsLORRI(oops.Host):
                 polynomial and its numerical inverse; "slow" to invert the polynomial by
                 Newton's method; "flat" for a field of view without distortion.
             pds3_options (dict[str, Any], optional): Any keyword arguments and their
-                values to be passed to the :class:`~pdsparser.Pds3Label` parser.
+                values to be passed to the :class:`~pdsparser.Pds3Label` parser. If the
+                parser's method, by default "fast", cannot read the label, the methods
+                after it in the order "fast", "strict", "loose" are tried in turn.
             astrometry (bool, optional):
                 True to specify that the returned Observations will only be used for
                 timing and astrometry. In this case, no data arrays are read and returned
@@ -204,35 +336,51 @@ class NewHorizonsLORRI(oops.Host):
                 as the file stores it.
 
         Returns:
-            Snapshot: The observation, with subfields `dict`, `headers`, `host`,
-            `instrument`, `binning_mode`, `label_target`,
-            `spacecraft_clock_start_count`, `spacecraft_clock_stop_count`,
-            `spice_kernels`, `filepath`, `basename`, `spice_to_frame`, `spice_frame_name`,
-            `spice_frame_id`, `abspath` and `image_url` inserted, and `data`, `error` and
-            `quality` unless `astrometry` is True. `dict` is the primary FITS header
-            without its COMMENT and HISTORY cards, and `headers` is the list of the
-            headers of every HDU. `data` is the primary image as stored, which in a raw
-            product includes the columns beyond the field of view; `error` and `quality`
-            are the error estimates and quality flags of a calibrated product, and None
-            for a raw one. `label_target` is the FITS header's target name as written,
-            and the target is that name repaired: "NONE" for "---", "N/A" or
-            "CALIBRATION", which mean the image has no target, and "PLUTO" for a name
-            beginning with "PLUTO". The two clock counts are the start and end of the
-            exposure, in the form "SSSSSSSSSS:TTTTT" that the PDS3 label uses: the
-            header's SPCSCLK0, and its STOPMET converted to that form. Either is None if
-            the header does not give it. `filepath` and the other path subfields name the
-            FITS file even when a label was given. An astrometry read of a label differs
-            as described above.
+            Snapshot: The observation, with subfields `dict`, `host`, `instrument`,
+            `binning_mode`, `spice_kernels`, `filepath`, `basename`, `spice_to_frame`,
+            `spice_frame_name` and `spice_frame_id` inserted, and these where they apply:
+
+            - `label_target`, `spacecraft_clock_start_count` and
+              `spacecraft_clock_stop_count`: the merged TARGET_NAME and clock counts,
+              absent where no source read gives them. The counts are the start and end
+              of the exposure, spelled as the PDS3 label spells them, as in
+              "0030713585:49000".
+            - `label_dict`: the PDS3 label as a dictionary, if it was read.
+            - `header_dict`: the primary FITS header without its blank, COMMENT and
+              HISTORY cards, and `headers`, the list of the headers of every HDU, if the
+              FITS file was read.
+            - `data`: the primary image as stored, which in a raw product includes the
+              columns beyond the field of view, unless `astrometry` is True.
+            - `error` and `quality`: the error estimates and quality flags of a
+              calibrated product, unless `astrometry` is True; absent for a raw product.
+            - `abspath` and `image_url`, unless `astrometry` is True and the label is
+              remote, so that the FITS file was never fetched (`image_url` is then
+              still given).
+
+            `dict` holds the merged items under their PDS3 names, START_TIME as an ISO
+            string to the millisecond, and every other key of each source read under its
+            own name; the FITS keywords converted to the items are left out, and so is
+            any value that counts as missing. The target is the merged TARGET_NAME,
+            repaired: "NONE" if it is missing or "CALIBRATION", which mean the image has
+            no target, and "PLUTO" for a name beginning with "PLUTO". `filepath` and the
+            other path subfields name the FITS file even when a label was given.
 
         Raises:
             FileNotFoundError: If the FITS file that a PDS3 label names does not exist,
                 except in an astrometry read.
             oops.OopsValueError: If `geom`, `pointing` or `fov_type` is not one of the
-                values listed above, or if `geom` or `pointing` is not "spice" in an
-                astrometry read of a PDS3 label.
+                values listed above.
+            oops.host.HostError: If `geom` or `pointing` is not "spice" in an astrometry
+                read of a PDS3 label, which reads no FITS header, or if the pointing
+                comes from the C kernels and they give none at mid-exposure; the message
+                then ends with the SPICE error, which begins with its short code, such as
+                "SPICE(NOFRAMECONNECT)".
             oops.host.HostFormatError: If the image is not 1024 or 256 lines, if the
-                FITS file is not valid FITS, or if a PDS3 label names no FITS file.
-            oops.host.PdsHostError: If the PDS3 label cannot be parsed.
+                FITS file is not valid FITS, if a PDS3 label names no FITS file, or if no
+                source read gives the start time, the exposure duration or the lines of
+                the image.
+            oops.host.PdsHostError: If no method of the PDS3 label parser can read the
+                label.
             oops.host.WrongHostError: If `fileinfo` is not a New Horizons LORRI PDS3 label
                 or FITS file.
             OSError: If the file cannot be read.
@@ -255,11 +403,17 @@ class NewHorizonsLORRI(oops.Host):
             if filepath.suffix.lower() in _FITS_SUFFIXES:
                 parsed = NewHorizonsLORRI._open_fits(filepath)
             else:
-                parsed = NewHorizonsLORRI._read_fileinfo(filepath, formats='P',
-                                                         pds3_options=pds3_options)
+                parsed = NewHorizonsLORRI._parse_label(filepath, pds3_options)
         else:
             filepath = None
             parsed = fileinfo
+            if isinstance(parsed, Pds3Label) and not NewHorizonsLORRI._detect_in_pds3(
+                    parsed):
+                raise oops.host.WrongHostError(f'not a {NewHorizonsLORRI.NAME} PDS3 '
+                                               f'label: {parsed.filepath}')
+            if not isinstance(parsed, (Pds3Label, pyfits.HDUList)):
+                raise oops.host.WrongHostError(f'not a {NewHorizonsLORRI.NAME} PDS3 '
+                                               f'label or FITS file: {parsed!r}')
 
         overrides = {
             'target'      : target,
@@ -275,18 +429,20 @@ class NewHorizonsLORRI(oops.Host):
             'parallel'    : parallel,
         }
 
-        # An astrometry read of a label reads the label alone
-        if isinstance(parsed, Pds3Label) and astrometry:
-            if geom != 'spice' or pointing != 'spice':
-                raise oops.OopsValueError('geom and pointing from the FITS header need '
-                                          'the FITS file; an astrometry read of a PDS3 '
-                                          'label reads only the label')
-            return NewHorizonsLORRI._snapshot_from_label(parsed, fov_type=fov_type,
-                                                         overrides=overrides)
-
+        label = None
+        hdulist = None
         if isinstance(parsed, Pds3Label):
-            filepath = NewHorizonsLORRI._fits_path(parsed)
-            hdulist = NewHorizonsLORRI._open_fits(filepath)
+            label = parsed
+            if astrometry:
+                # An astrometry read of a label reads the label alone
+                if geom != 'spice' or pointing != 'spice':
+                    raise oops.host.HostError('geom and pointing from the FITS header '
+                                              'need the FITS file; an astrometry read of '
+                                              'a PDS3 label reads only the label')
+                filepath = NewHorizonsLORRI._fits_path(label, check=False)
+            else:
+                filepath = NewHorizonsLORRI._fits_path(label)
+                hdulist = NewHorizonsLORRI._open_fits(filepath)
         else:
             hdulist = parsed
             if filepath is None:
@@ -298,15 +454,18 @@ class NewHorizonsLORRI(oops.Host):
 
         # Everything needed is copied out of the file, which is then closed, including
         # an HDUList that oops.Host.from_file() or the caller opened
-        try:
-            headers = [hdu.header.copy() for hdu in hdulist]
-            arrays = None
-            if not astrometry:
-                arrays = NewHorizonsLORRI._read_arrays(hdulist)
-        finally:
-            hdulist.close()
+        headers = None
+        arrays = None
+        if hdulist is not None:
+            try:
+                headers = [hdu.header.copy() for hdu in hdulist]
+                if not astrometry:
+                    arrays = NewHorizonsLORRI._read_arrays(hdulist)
+            finally:
+                hdulist.close()
 
-        return NewHorizonsLORRI._make_snapshot(headers, filepath, arrays, geom=geom,
+        return NewHorizonsLORRI._make_snapshot(filepath, label=label, headers=headers,
+                                               arrays=arrays, geom=geom,
                                                pointing=pointing, fov_type=fov_type,
                                                overrides=overrides)
 
@@ -323,9 +482,10 @@ class NewHorizonsLORRI(oops.Host):
                 index file or its PDS label, such as ``NHJULO_2001_index.lbl``.
             supplement (str | pathlib.Path | FCPath, optional): The path to the PDS label
                 of the supplemental index, whose columns are merged into each row. Its
-                rows must name the same files in the same order as the index. Where both
-                tables give a column, the supplement's value is kept, because the
-                supplement is spelled as the product labels are. If not specified, the
+                rows must name the same files as the index's, matched on VOLUME_ID and
+                FILE_SPECIFICATION_NAME, in any order. Where both tables give a column,
+                the supplement's value is kept, because the supplement is spelled as the
+                product labels are. If not specified, the
                 directory of `filepath` is searched for a file whose name matches except
                 that "_index" is replaced by "_supplemental_index" in upper or lower case.
             row_dicts (list[dict[str, Any]], optional): A list of dictionaries, one per
@@ -379,24 +539,25 @@ class NewHorizonsLORRI(oops.Host):
             **kwargs: Additional keyword arguments; they are accepted and ignored.
 
         Returns:
-            list[Snapshot]: One observation per row of the index, each with subfields
-            `dict`, `host`, `instrument`, `binning_mode`, `label_target`,
-            `spacecraft_clock_start_count`, `spacecraft_clock_stop_count`,
+            list[Snapshot]: One observation per row of the index, in the index's order,
+            each with subfields `dict`, `host`, `instrument`, `binning_mode`,
             `spice_kernels`, `filepath`, `basename`, `spice_to_frame`, `spice_frame_name`
-            and `spice_frame_id` inserted. `dict` is the row, merged with its row of the
-            supplement. `filepath` is the VOLUME_ID and the FILE_SPECIFICATION_NAME, with
-            the label's suffix replaced by the FITS file's, joined by a slash.
-            `label_target` is the row's TARGET_NAME, and the target is that name repaired
-            as for :meth:`from_file`.
+            and `spice_frame_id` inserted, and `label_target`,
+            `spacecraft_clock_start_count` and `spacecraft_clock_stop_count` where the
+            row gives TARGET_NAME and the clock counts other than "UNK", "N/A", "NULL"
+            or "---". `dict` is the row, merged with its row of the supplement.
+            `filepath` is the VOLUME_ID and the FILE_SPECIFICATION_NAME, with the label's
+            suffix replaced by the FITS file's, joined by a slash. The target is the
+            row's TARGET_NAME repaired as for :meth:`from_file`.
 
         Raises:
             FileNotFoundError: If the supplement does not exist.
             oops.OopsValueError: If `fov_type` is not "fast", "slow" or "flat".
-            oops.host.HostFormatError: If a row's BINNING_MODE is not "1X1" or "4X4".
-            oops.host.HostIndexError: If the supplement does not have the same number of
-                rows as the index, if a row's VOLUME_ID or FILE_SPECIFICATION_NAME
-                differs from the index's, or if `supplement` is not specified and the
-                name of `filepath` contains no "_index".
+            oops.host.HostFormatError: If a row's BINNING_MODE is not "1X1" or "4X4", or
+                if a row gives no START_TIME or EXPOSURE_DURATION.
+            oops.host.HostIndexError: If the supplement and the index do not list the
+                same files, each once, or if `supplement` is not specified and the name
+                of `filepath` contains no "_index".
             oops.host.WrongHostError: If `filepath` is not a New Horizons LORRI index.
             OSError: If `filepath`, or a `supplement` that is specified, does not exist or
                 cannot be read.
@@ -407,10 +568,8 @@ class NewHorizonsLORRI(oops.Host):
 
         # Read and filter the index table
         if row_dicts is None:
-            supplement = supplement or oops.Host.SUPPLEMENT
-            row_dicts = NewHorizonsLORRI._read_index_rows(
-                filepath, supplement=supplement,
-                validate=NewHorizonsLORRI._match_index_rows, pds3_options=pds3_options)
+            row_dicts = NewHorizonsLORRI._read_index_and_supplement(
+                filepath, supplement, pds3_options=pds3_options)
         row_dicts = oops.Host._filter_index_rows(row_dicts, filter)
 
         overrides = {
@@ -447,6 +606,55 @@ class NewHorizonsLORRI(oops.Host):
         if value not in allowed:
             raise oops.OopsValueError(f'invalid {name} {value!r}; use one of '
                                       + ', '.join(repr(item) for item in allowed))
+
+    @staticmethod
+    def _parse_label(filepath, pds3_options):
+        """A LORRI PDS3 label, parsed by the first method of the parser that reads it.
+
+        Parameters:
+            filepath (FCPath): The path to the label.
+            pds3_options (dict[str, Any]): The options for the parser, including its
+                method. The methods after it in :data:`_PDS3_METHODS` are tried in turn
+                if it fails.
+
+        Returns:
+            Pds3Label: The parsed label.
+
+        Raises:
+            oops.OopsValueError: If the method in `pds3_options` is not one of
+                :data:`_PDS3_METHODS`, or if another option is not one the parser
+                accepts.
+            oops.host.PdsHostError: If no method can read the label; the message gives
+                each method's error.
+            oops.host.WrongHostError: If the label does not describe a New Horizons
+                LORRI image.
+            OSError: If the file does not exist or cannot be read.
+        """
+
+        first = pds3_options['method']
+        if first not in _PDS3_METHODS:
+            raise oops.OopsValueError(f'invalid PDS3 parser method {first!r}; use one '
+                                      'of ' + ', '.join(repr(m) for m in _PDS3_METHODS))
+
+        errors = []
+        for method in _PDS3_METHODS[_PDS3_METHODS.index(first):]:
+            try:
+                label = Pds3Label(filepath, **(pds3_options | {'method': method}))
+            except TypeError as err:
+                raise oops.OopsValueError(f'invalid PDS3 parser option: {err}') from err
+            # Besides PdsError, the fast method raises a ValueError for a value it cannot
+            # convert, such as a time with an hour of 25 (JulianValidateFailure)
+            except (PdsError, ValueError) as err:
+                errors.append(f'method {method}: {err}')
+                continue
+
+            if not NewHorizonsLORRI._detect_in_pds3(label):
+                raise oops.host.WrongHostError(f'not a {NewHorizonsLORRI.NAME} PDS3 '
+                                               f'label: {filepath}')
+            return label
+
+        raise oops.host.PdsHostError(f'PDS3 label cannot be parsed: {filepath}; '
+                                     + '; '.join(errors))
 
     @staticmethod
     def _fits_path(label, *, check=True):
@@ -534,13 +742,13 @@ class NewHorizonsLORRI(oops.Host):
             hdulist (HDUList): The FITS file.
 
         Returns:
-            dict[str, numpy.ndarray | None]: The arrays keyed by subfield name: `data`,
-            the primary image, and `error` and `quality`, the extensions of a calibrated
-            product that hold them, or None where the file has no such extension. Each
-            array is a copy, so it outlives the file.
+            dict[str, numpy.ndarray]: The arrays keyed by subfield name: `data`, the
+            primary image, and `error` and `quality`, the extensions of a calibrated
+            product that hold them, each only if the file has it. Each array is a copy,
+            so it outlives the file.
         """
 
-        arrays = {'data': np.array(hdulist[0].data), 'error': None, 'quality': None}
+        arrays = {'data': np.array(hdulist[0].data)}
         for hdu in hdulist[1:]:
             extname = str(hdu.header.get('EXTNAME', '')).strip().upper()
             if extname == _ERROR_EXTNAME:
@@ -551,15 +759,18 @@ class NewHorizonsLORRI(oops.Host):
         return arrays
 
     @staticmethod
-    def _make_snapshot(headers, filepath, arrays, *, geom, pointing, fov_type,
+    def _make_snapshot(filepath, *, label, headers, arrays, geom, pointing, fov_type,
                        overrides):
-        """A Snapshot built from the headers and arrays of a LORRI FITS file.
+        """A Snapshot built from a PDS3 label, the headers and arrays of a FITS file, or
+        both.
 
         Parameters:
-            headers (list[astropy.io.fits.Header]): The header of every HDU.
             filepath (FCPath): The path to the FITS file.
-            arrays (dict[str, numpy.ndarray | None] | None): The arrays as
-                :meth:`_read_arrays` returns them; None to omit them.
+            label (Pds3Label | None): The detached label; None if it was not read.
+            headers (list[astropy.io.fits.Header] | None): The header of every HDU; None
+                if the FITS file was not read.
+            arrays (dict[str, numpy.ndarray] | None): The arrays as :meth:`_read_arrays`
+                returns them; None to omit them.
             geom (str): "spice" or "fits", as for :meth:`from_file`.
             pointing (str): "spice", "fits", "fitsapp" or "fits90", as for
                 :meth:`from_file`.
@@ -571,28 +782,46 @@ class NewHorizonsLORRI(oops.Host):
             Snapshot: The observation, with the subfields listed for :meth:`from_file`.
 
         Raises:
-            oops.host.HostFormatError: If the image is not 1024 or 256 lines.
+            oops.host.HostFormatError: If the image is not 1024 or 256 lines, or if no
+                source gives the start time, the exposure duration or the lines.
         """
 
-        header = headers[0]
+        header = None if headers is None else headers[0]
+        source = filepath if label is None else label.filepath
 
-        # Key information from the header
-        texp = header['EXPTIME']
-        tdb_midtime = header['SPCSCET']
-        tstart = tdb_midtime - texp / 2.
+        label_dict = None if label is None else label.as_dict()
+        label_items = {}
+        if label_dict is not None:
+            label_items = NewHorizonsLORRI._items_from_pds3(label_dict)
+            if 'LINES' in label_dict.get('IMAGE', {}):
+                label_items['LINES'] = label_dict['IMAGE']['LINES']
 
-        lines = header['NAXIS2']
+        header_dict = None
+        fits_items = {}
+        if header is not None:
+            header_dict = {key: value for (key, value) in header.items()
+                           if key not in _COMMENTARY_KEYWORDS}
+            fits_items = NewHorizonsLORRI._items_from_header(header_dict)
+
+        items = NewHorizonsLORRI._merge_items(label_items, fits_items)
+        for name in ('EXPOSURE_DURATION', 'START_TIME', 'LINES'):
+            NewHorizonsLORRI._require(items, name, source)
+
+        lines = items['LINES']
         if lines not in _BINNING_MODES:
             raise oops.host.HostFormatError(f'unrecognized LORRI image shape: '
-                                            f'{lines} lines in {filepath}')
+                                            f'{lines} lines in {source}')
         binning_mode = _BINNING_MODES[lines]
 
-        label_target = header['SPCCBTNM']
-        target_name = NewHorizonsLORRI._repair_target(label_target)
+        tstart = items['START_TIME']
+        texp = items['EXPOSURE_DURATION']
+        tdb_midtime = tstart + texp / 2.
+        target_name = NewHorizonsLORRI._repair_target(items.get('TARGET_NAME'))
 
         # Define the path and frame. A default that an override replaces is not built,
         # so the header need not give its values, and the apparent pointing uses the
-        # observer that the Snapshot will have.
+        # observer that the Snapshot will have. geom and pointing other than "spice"
+        # are refused before this point when the header was not read.
         if overrides['path'] is not None:
             default_path = overrides['path']
         elif geom == 'spice':
@@ -606,6 +835,7 @@ class NewHorizonsLORRI(oops.Host):
             default_frame = overrides['frame']
         elif pointing == 'spice':
             NewHorizonsLORRI._define_camera_frame()
+            NewHorizonsLORRI._check_pointing(tdb_midtime, filepath)
             default_frame = _SPICE_FRAME_NAME
         else:
             default_frame = NewHorizonsLORRI._fits_frame_from_header(
@@ -623,22 +853,38 @@ class NewHorizonsLORRI(oops.Host):
             'calibrations': [],         # TBD
         }
 
-        # Apply standard overrides
+        # Apply standard overrides. A remote FITS file that was not read was not
+        # fetched, so no local copy of it exists to name.
         oops.Host._apply_overrides(params, filepath, **overrides)
+        if header is None and not filepath.is_local():
+            del params['abspath']
 
         obs = oops.observation.Snapshot(('v', 'u'), **params)
         if arrays is not None:
             obs.insert_subfields(arrays)
 
-        # Extra attributes: use standardized names wherever practical
-        dict_ = {key: value for (key, value) in header.items()
-                 if key not in _COMMENTARY_KEYWORDS}
+        # The merged items under their PDS3 names, then every other key of each source
+        dict_ = {}
+        if label_dict is not None:
+            dict_.update(label_dict)
+        if header_dict is not None:
+            # NAXIS2 stays, because LINES is not a key of `dict`
+            converted = {keyword for (name, keywords) in _FITS_ITEM_KEYWORDS.items()
+                         if name != 'LINES' for keyword in keywords}
+            dict_.update({key: value for (key, value) in header_dict.items()
+                          if key not in converted and key not in dict_})
+        dict_ = {key: value for (key, value) in dict_.items()
+                 if not NewHorizonsLORRI._is_null(value)}
+        dict_.update(NewHorizonsLORRI._dict_items(items))
+
         obs.insert_subfield('dict', dict_)
-        obs.insert_subfield('headers', headers)
-        stop_count = NewHorizonsLORRI._sclk_from_met(header.get('STOPMET'))
-        NewHorizonsLORRI._insert_common_subfields(
-            obs, binning_mode=binning_mode, label_target=label_target, target=target_name,
-            start_count=header.get('SPCSCLK0'), stop_count=stop_count, ck=using_cks)
+        if label_dict is not None:
+            obs.insert_subfield('label_dict', label_dict)
+        if header_dict is not None:
+            obs.insert_subfield('header_dict', header_dict)
+            obs.insert_subfield('headers', headers)
+        NewHorizonsLORRI._insert_common_subfields(obs, items, binning_mode=binning_mode,
+                                                  target=target_name, ck=using_cks)
         return obs
 
     @staticmethod
@@ -655,7 +901,8 @@ class NewHorizonsLORRI(oops.Host):
             Snapshot: The observation, with the subfields listed for :meth:`from_index`.
 
         Raises:
-            oops.host.HostFormatError: If the row's BINNING_MODE is not "1X1" or "4X4".
+            oops.host.HostFormatError: If the row's BINNING_MODE is not "1X1" or "4X4",
+                or if the row gives no START_TIME or EXPOSURE_DURATION.
         """
 
         binning_mode = row_dict['BINNING_MODE'].upper()
@@ -669,77 +916,18 @@ class NewHorizonsLORRI(oops.Host):
         fits_suffix = 'FIT' if suffix.isupper() else 'fit'
         filepath = row_dict['VOLUME_ID'] + '/' + stem + '.' + fits_suffix
 
-        return NewHorizonsLORRI._snapshot_from_dict(row_dict, filepath, binning_mode,
-                                                    fov_type=fov_type,
-                                                    overrides=overrides)
+        items = NewHorizonsLORRI._items_from_pds3(row_dict)
+        for name in ('EXPOSURE_DURATION', 'START_TIME'):
+            NewHorizonsLORRI._require(items, name, filepath)
 
-    @staticmethod
-    def _snapshot_from_label(label, *, fov_type, overrides):
-        """A Snapshot built from a PDS3 label alone, for an astrometry read.
-
-        Parameters:
-            label (Pds3Label): The label.
-            fov_type (str): "fast", "slow" or "flat", as for :meth:`from_file`.
-            overrides (dict[str, Any]): The values of the standard overrides, as described
-                for :meth:`from_file`.
-
-        Returns:
-            Snapshot: The observation, with the subfields listed for :meth:`from_file`
-            for an astrometry read of a label.
-
-        Raises:
-            oops.host.HostFormatError: If the label's IMAGE object is not 1024 or 256
-                lines, or if the label names no FITS file.
-        """
-
-        filepath = NewHorizonsLORRI._fits_path(label, check=False)
-
-        lines = label['IMAGE']['LINES']
-        if lines not in _BINNING_MODES:
-            raise oops.host.HostFormatError(f'unrecognized LORRI image shape: '
-                                            f'{lines} lines in {label.filepath}')
-
-        dict_ = label.as_dict()
-        return NewHorizonsLORRI._snapshot_from_dict(dict_, filepath,
-                                                    _BINNING_MODES[lines],
-                                                    fov_type=fov_type,
-                                                    overrides=overrides)
-
-    @staticmethod
-    def _snapshot_from_dict(dict_, filepath, binning_mode, *, fov_type, overrides):
-        """A Snapshot built from a PDS3 label or an index row, which use the same names.
-
-        Parameters:
-            dict_ (dict[str, Any]): The label as a dictionary, or the index row. It must
-                give START_TIME, EXPOSURE_DURATION, TARGET_NAME,
-                SPACECRAFT_CLOCK_START_COUNT and SPACECRAFT_CLOCK_STOP_COUNT.
-            filepath (str | FCPath): The path to the FITS file, or for an index row, the
-                path relative to the root of the volumes.
-            binning_mode (str): "1X1" or "4X4".
-            fov_type (str): "fast", "slow" or "flat", as for :meth:`from_file`.
-            overrides (dict[str, Any]): The values of the standard overrides, as described
-                for :meth:`from_file`.
-
-        Returns:
-            Snapshot: The observation, with subfields `dict` and those that
-            :meth:`_insert_common_subfields` inserts.
-        """
-
-        # A label gives START_TIME as a datetime, an index row as an ISO string
-        start_time = dict_['START_TIME']
-        if isinstance(start_time, dt.datetime):
-            start_time = start_time.isoformat()
-        tstart = julian.tdb_from_tai(julian.tai_from_iso(start_time))
-        texp = dict_['EXPOSURE_DURATION']
+        tstart = items['START_TIME']
+        texp = items['EXPOSURE_DURATION']
 
         using_cks = overrides['frame'] is None
         if using_cks:
             NewHorizonsLORRI._define_camera_frame()
 
-        # The table reader returns NumPy strings; the subfields are Python strings, as
-        # from a FITS file
-        label_target = str(dict_['TARGET_NAME'])
-        target_name = NewHorizonsLORRI._repair_target(label_target)
+        target_name = NewHorizonsLORRI._repair_target(items.get('TARGET_NAME'))
         params = {
             'cadence'     : oops.cadence.SnapCadence(tstart, texp),
             'fov'         : NewHorizonsLORRI._FOVS[binning_mode, fov_type],
@@ -752,28 +940,197 @@ class NewHorizonsLORRI(oops.Host):
         oops.Host._apply_overrides(params, filepath, **overrides)
 
         obs = oops.observation.Snapshot(('v', 'u'), **params)
-        obs.insert_subfield('dict', dict_)
-        NewHorizonsLORRI._insert_common_subfields(
-            obs, binning_mode=binning_mode, label_target=label_target, target=target_name,
-            start_count=str(dict_['SPACECRAFT_CLOCK_START_COUNT']),
-            stop_count=str(dict_['SPACECRAFT_CLOCK_STOP_COUNT']), ck=using_cks)
+        obs.insert_subfield('dict', row_dict)
+        NewHorizonsLORRI._insert_common_subfields(obs, items, binning_mode=binning_mode,
+                                                  target=target_name, ck=using_cks)
         return obs
 
     @staticmethod
-    def _insert_common_subfields(obs, *, binning_mode, label_target, target, start_count,
-                                 stop_count, ck):
+    def _check_pointing(tdb, filepath):
+        """Raise HostError if the C kernels give no pointing of the camera at a time.
+
+        Parameters:
+            tdb (float): The time in seconds TDB.
+            filepath (FCPath): The path to the FITS file, for the message.
+
+        Raises:
+            oops.host.HostError: If the camera frame cannot be evaluated at `tdb`. The
+                message ends with the SPICE error, which begins with its short code,
+                such as "SPICE(NOFRAMECONNECT)", so that missing SPICE data can be told
+                from other failures.
+        """
+
+        frame = oops.Frame.as_frame(_SPICE_FRAME_NAME).wrt(oops.Frame.J2000)
+        try:
+            frame.transform_at_time(tdb)
+        except Exception as err:    # cspyce maps each SPICE error to a builtin exception
+            if 'SPICE(' not in str(err):
+                raise
+            raise oops.host.HostError(f'no {NewHorizonsLORRI.NAME} pointing for '
+                                      f'{filepath}: {err}') from err
+
+    @staticmethod
+    def _require(items, name, source):
+        """Raise HostFormatError if a metadata item the Snapshot needs is missing.
+
+        Parameters:
+            items (dict[str, Any]): The metadata items.
+            name (str): The name of the item.
+            source (str | FCPath): The file or index row the items came from, for the
+                message.
+
+        Raises:
+            oops.host.HostFormatError: If `items` does not contain `name`.
+        """
+
+        if name not in items:
+            description = {'LINES': 'lines of the image (IMAGE LINES or NAXIS2)'}
+            raise oops.host.HostFormatError(f'no {description.get(name, name)} for '
+                                            f'LORRI image {source}')
+
+    @staticmethod
+    def _is_null(value):
+        """True if a value is a string that means the item is missing.
+
+        Parameters:
+            value (Any): The value.
+
+        Returns:
+            bool: True if `value` is one of :data:`_NULL_VALUES`, ignoring case and
+            surrounding blanks.
+        """
+
+        return isinstance(value, str) and value.strip().upper() in _NULL_VALUES
+
+    @staticmethod
+    def _items_from_pds3(dict_):
+        """The metadata items that a PDS3 label or an index row gives.
+
+        Parameters:
+            dict_ (dict[str, Any]): The label as a dictionary, or the index row.
+
+        Returns:
+            dict[str, Any]: The items, keyed by PDS3 name, leaving out any that is
+            missing, counts as missing, or cannot be read: START_TIME, in seconds TDB;
+            EXPOSURE_DURATION, in seconds; and TARGET_NAME,
+            SPACECRAFT_CLOCK_START_COUNT and SPACECRAFT_CLOCK_STOP_COUNT, as Python
+            strings.
+        """
+
+        values = {key: dict_[key] for key in _FITS_ITEM_KEYWORDS
+                  if key in dict_ and not NewHorizonsLORRI._is_null(dict_[key])}
+
+        items = {}
+        if 'START_TIME' in values:
+            # A label gives START_TIME as a datetime, an index row as an ISO string. A
+            # time or an exposure that does not convert counts as missing, so that the
+            # other source's value is used if there is one.
+            start_time = values['START_TIME']
+            if isinstance(start_time, dt.datetime):
+                start_time = start_time.isoformat()
+            try:
+                items['START_TIME'] = julian.tdb_from_tai(julian.tai_from_iso(
+                    str(start_time)))
+            except ValueError:
+                pass
+        if 'EXPOSURE_DURATION' in values:
+            try:
+                items['EXPOSURE_DURATION'] = float(values['EXPOSURE_DURATION'])
+            except (TypeError, ValueError):
+                pass
+
+        # The table reader returns NumPy strings; the subfields are Python strings
+        for key in ('TARGET_NAME', 'SPACECRAFT_CLOCK_START_COUNT',
+                    'SPACECRAFT_CLOCK_STOP_COUNT'):
+            if key in values:
+                items[key] = str(values[key])
+
+        return items
+
+    @staticmethod
+    def _items_from_header(header_dict):
+        """The metadata items that a FITS header gives, converted to the PDS3 forms.
+
+        Parameters:
+            header_dict (dict[str, Any]): The primary header as a dictionary.
+
+        Returns:
+            dict[str, Any]: The items as for :meth:`_items_from_pds3`, converted from the
+            keywords of :data:`_FITS_ITEM_KEYWORDS`, and LINES, the lines of the image.
+            An item other than LINES is left out if a keyword it needs is missing or
+            counts as missing.
+        """
+
+        def given(keyword):
+            return (keyword in header_dict
+                    and not NewHorizonsLORRI._is_null(header_dict[keyword]))
+
+        items = {}
+        if given('EXPTIME'):
+            items['EXPOSURE_DURATION'] = header_dict['EXPTIME']
+            if given('SPCSCET'):
+                items['START_TIME'] = header_dict['SPCSCET'] - header_dict['EXPTIME'] / 2.
+        if given('SPCCBTNM'):
+            items['TARGET_NAME'] = header_dict['SPCCBTNM']
+        if given('SPCSCLK0'):
+            items['SPACECRAFT_CLOCK_START_COUNT'] = header_dict['SPCSCLK0']
+        if given('STOPMET'):
+            items['SPACECRAFT_CLOCK_STOP_COUNT'] = NewHorizonsLORRI._sclk_from_met(
+                header_dict['STOPMET'])
+        items['LINES'] = header_dict['NAXIS2']
+
+        return items
+
+    @staticmethod
+    def _merge_items(label_items, fits_items):
+        """The metadata items of the detached label and the FITS header, merged.
+
+        Parameters:
+            label_items (dict[str, Any]): The items of the label.
+            fits_items (dict[str, Any]): The items of the FITS header.
+
+        Returns:
+            dict[str, Any]: Every item of either source. Where both give an item, the
+            values are compared, and where they differ, the item's rule in
+            :data:`_RESOLUTION_RULES` chooses.
+        """
+
+        items = fits_items | label_items
+        for name in label_items.keys() & fits_items.keys():
+            if label_items[name] != fits_items[name]:
+                items[name] = _RESOLUTION_RULES[name](label_items[name],
+                                                      fits_items[name])
+        return items
+
+    @staticmethod
+    def _dict_items(items):
+        """The merged items as `dict` gives them.
+
+        Parameters:
+            items (dict[str, Any]): The merged items, which include START_TIME.
+
+        Returns:
+            dict[str, Any]: The items under their PDS3 names, without LINES, which the
+            label gives inside its IMAGE object; START_TIME is an ISO string to the
+            millisecond, as the label writes it.
+        """
+
+        dict_ = {key: value for (key, value) in items.items() if key != 'LINES'}
+        tai = julian.tai_from_tdb(dict_['START_TIME'])
+        dict_['START_TIME'] = julian.iso_from_tai(tai, digits=_TIME_DIGITS)
+        return dict_
+
+    @staticmethod
+    def _insert_common_subfields(obs, items, *, binning_mode, target, ck):
         """Insert the subfields that file and index observations share.
 
         Parameters:
             obs (Snapshot): The observation.
+            items (dict[str, Any]): The metadata items; TARGET_NAME and the clock counts
+                become subfields where they are given.
             binning_mode (str): "1X1" or "4X4".
-            label_target (str): The target name as the file or index writes it.
             target (str): The name of the default target, whose kernels are included in
                 `spice_kernels`.
-            start_count (str | None): The spacecraft clock count at the start of the
-                exposure.
-            stop_count (str | None): The spacecraft clock count at the end of the
-                exposure.
             ck (bool): True if the pointing comes from the C kernels, so that they are
                 included in `spice_kernels`.
         """
@@ -781,9 +1138,13 @@ class NewHorizonsLORRI(oops.Host):
         obs.insert_subfield('host', 'New Horizons')
         obs.insert_subfield('instrument', 'LORRI')
         obs.insert_subfield('binning_mode', binning_mode)
-        obs.insert_subfield('label_target', label_target)
-        obs.insert_subfield('spacecraft_clock_start_count', start_count)
-        obs.insert_subfield('spacecraft_clock_stop_count', stop_count)
+        for (subfield, name) in [('label_target', 'TARGET_NAME'),
+                                 ('spacecraft_clock_start_count',
+                                  'SPACECRAFT_CLOCK_START_COUNT'),
+                                 ('spacecraft_clock_stop_count',
+                                  'SPACECRAFT_CLOCK_STOP_COUNT')]:
+            if name in items:
+                obs.insert_subfield(subfield, items[name])
 
         # With a custom frame, pointing never came from a CK, so any CK that happens to be
         # furnished is unrelated to this observation and must not be reported as used.
@@ -795,22 +1156,21 @@ class NewHorizonsLORRI(oops.Host):
 
     @staticmethod
     def _repair_target(name):
-        """The target name of a FITS header, repaired.
+        """The name of the target body for a TARGET_NAME.
 
-        A FITS header gives "---" or "N/A" when the image has no target, and a label or
-        index gives "CALIBRATION" for the calibration images of the launch phase. Some
-        images of Pluto give a name that begins with "PLUTO".
+        A label or index gives "CALIBRATION" for the calibration images of the launch
+        phase, whose FITS header gives no target. Some images of Pluto give a name that
+        begins with "PLUTO".
 
         Parameters:
-            name (str): The FITS header's SPCCBTNM, or the TARGET_NAME of a label or
-                index.
+            name (str | None): The merged TARGET_NAME; None if no source gives one.
 
         Returns:
             str: The name of the target body: "NONE" for an image with no target, "PLUTO"
             for a name beginning with "PLUTO", and otherwise `name` itself.
         """
 
-        if name.strip() in _NO_TARGET_NAMES:
+        if name is None or name.strip() in _NO_TARGET_NAMES:
             return 'NONE'
         if name.startswith('PLUTO'):
             return 'PLUTO'
@@ -821,16 +1181,13 @@ class NewHorizonsLORRI(oops.Host):
         """A mission elapsed time converted to a clock count in the PDS3 label's form.
 
         Parameters:
-            met (float | None): Seconds of the spacecraft clock, as the FITS header's
-                STARTMET and STOPMET give them.
+            met (float): Seconds of the spacecraft clock, as the FITS header's STARTMET
+                and STOPMET give them.
 
         Returns:
-            str | None: The count as "SSSSSSSSSS:TTTTT", ten digits of whole seconds and
-            five of the 1/50000-second ticks past them; None if `met` is None.
+            str: The count as "SSSSSSSSSS:TTTTT", ten digits of whole seconds and five of
+            the 1/50000-second ticks past them.
         """
-
-        if met is None:
-            return None
 
         (seconds, ticks) = divmod(round(met * _SCLK_TICKS), _SCLK_TICKS)
         return f'{seconds:010d}:{ticks:05d}'
@@ -939,37 +1296,71 @@ class NewHorizonsLORRI(oops.Host):
         return (ra, dec)
 
     @staticmethod
-    def _match_index_rows(index_row, supplement_row):
-        """True if a row of the index and a row of its supplement describe one image.
+    def _read_index_and_supplement(filepath, supplement, *, pds3_options):
+        """The rows of an index, each merged with the row of its supplement for the same
+        image.
 
-        The rows match on :data:`_INDEX_KEYS`. The other columns the two tables share are
-        written differently: the index gives each clock count with its partition, as in
-        "1/0030598438:48850", and rounds the stop count differently from the label,
-        whereas the supplement copies the label. :meth:`oops.Host._read_index_rows` keeps
-        the index's value of a shared column, so this function copies the supplement's
-        row into the index's before that merge, so that every shared column is spelled as
-        the product labels spell it.
+        The rows are matched on :data:`_INDEX_KEYS` rather than by position, because the
+        supplement of NHJULO_1001 lists two rows in a different order from its index.
+        The other columns the two tables share are written differently: the index gives
+        each clock count with its partition, as in "1/0030598438:48850", and rounds the
+        stop count differently from the label, whereas the supplement copies the label.
+        So the supplement's value of a shared column is kept.
 
         Parameters:
-            index_row (dict[str, Any]): The row of the index, updated in place.
-            supplement_row (dict[str, Any]): The row of the supplement.
+            filepath (str | pathlib.Path | FCPath): The path to the label of the index.
+            supplement (str | pathlib.Path | FCPath | object | None): The path to the
+                label of the supplement; None or :data:`oops.Host.SUPPLEMENT` for the
+                file beside the index whose name has "_supplemental_index" in place of
+                "_index".
+            pds3_options (dict[str, Any] | None): The options for the PDS3 label parser.
 
         Returns:
-            bool: True if the rows match.
+            list[dict[str, Any]]: One dictionary per row of the index, in its order.
 
         Raises:
-            oops.host.HostIndexError: If the rows differ in a column of
-                :data:`_INDEX_KEYS`.
+            FileNotFoundError: If the supplement does not exist.
+            oops.host.HostIndexError: If the two tables do not list the same images, each
+                once, or if `supplement` is not specified and the name of `filepath`
+                contains no "_index".
+            oops.host.WrongHostError: If either table is not a New Horizons LORRI index.
         """
 
-        for key in _INDEX_KEYS:
-            if index_row[key] != supplement_row[key]:
-                raise oops.host.HostIndexError(f'{key} value mismatch: '
-                                               f'{index_row[key]!r}, '
-                                               f'{supplement_row[key]!r}')
+        filepath = FCPath(filepath)
+        if supplement is None or supplement is oops.Host.SUPPLEMENT:
+            name = (filepath.name.replace('_index', '_supplemental_index')
+                                 .replace('_INDEX', '_SUPPLEMENTAL_INDEX'))
+            if name == filepath.name:
+                raise oops.host.HostIndexError(f'supplemental index required for '
+                                               f'{filepath}')
+            supplement = filepath.with_name(name)
 
-        index_row.update(supplement_row)
-        return True
+        row_dicts = NewHorizonsLORRI._read_index_rows(filepath, supplement=None,
+                                                      pds3_options=pds3_options)
+        supp_dicts = NewHorizonsLORRI._read_index_rows(supplement, supplement=None,
+                                                       pds3_options=pds3_options)
+
+        def key(row_dict):
+            return tuple(str(row_dict[name]) for name in _INDEX_KEYS)
+
+        supp_by_key = {}
+        for supp_dict in supp_dicts:
+            if key(supp_dict) in supp_by_key:
+                raise oops.host.HostIndexError(f'supplemental index lists '
+                                               f'{key(supp_dict)} twice: {supplement}')
+            supp_by_key[key(supp_dict)] = supp_dict
+
+        index_keys = {key(row_dict) for row_dict in row_dicts}
+        if len(index_keys) != len(row_dicts):
+            raise oops.host.HostIndexError(f'index lists an image twice: {filepath}')
+        if index_keys != supp_by_key.keys():
+            missing = sorted(index_keys - supp_by_key.keys())
+            extra = sorted(supp_by_key.keys() - index_keys)
+            raise oops.host.HostIndexError(
+                f'index files list different images: {filepath}, {supplement}; '
+                f'only in the index: {missing[:3]}; only in the supplement: {extra[:3]}')
+
+        return [row_dict | supp_by_key[key(row_dict)] for row_dict in row_dicts]
 
     ######################################################################################
     # Detectors

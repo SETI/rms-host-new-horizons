@@ -34,6 +34,11 @@ __all__ = ['NewHorizonsLORRI']
 
 class NewHorizonsLORRI(Host):
     # The runtime names the first parameter `fileinfo`, where Host names it `filepath`.
+    # A file that cannot be read or parsed raises oops.host.HostFormatError (or its
+    # subclass PdsHostError); geom or pointing other than "spice" in an astrometry read of
+    # a PDS3 label, and an image with no C-kernel pointing, raise oops.host.HostError,
+    # whose message for missing pointing includes the SPICE error code, such as
+    # "SPICE(NOFRAMECONNECT)".
     @staticmethod
     def from_file(  # type: ignore[override]
         fileinfo: str | pathlib.Path | FCPath | Pds3Label | HDUList, *,

@@ -31,17 +31,19 @@ BODY_IDS = {
     'ARROKOTH'  : 2486958,
 }
 
-# The primary header of a synthetic LORRI FITS file, before any overrides
+# The primary header of a synthetic LORRI FITS file, before any overrides. Its values
+# agree with those of write_label(), as the archive's do: the label's START_TIME is the
+# start of the exposure, SPCSCET - EXPTIME/2, rounded to the millisecond.
 FITS_HEADER: dict[str, Any] = {
     'MISSION' : 'New Horizons',
     'INSTRU'  : 'lor',
-    'EXPTIME' : 0.5,
-    'SPCSCET' : 221679736.0,
+    'EXPTIME' : 5.0,
+    'SPCSCET' : 221679736.0467595,
     'SPCUTCID': '2007-010T05:41:10.863',
     'SPCCBTNM': 'JUPITER',
     'SPCSCLK0': '0030713585:49000',
     'STARTMET': 30713585.98,
-    'STOPMET' : 30713586.48,
+    'STOPMET' : 30713590.98,
     'SPCEMEN' : 275.0,
     'CRPIX1'  : 512.5,
     'CRPIX2'  : 512.5,
@@ -93,13 +95,27 @@ def write_fits(path: pathlib.Path, *, lines: int = 1024, samples: int = 1024,
     return path
 
 
-def write_label(path: pathlib.Path, image: str | None, *, host: str = 'NEW HORIZONS',
-                instrument: str = 'LORRI', lines: int = 1024,
-                target: str = 'J17 CALLIRRHOE') -> pathlib.Path:
+# The keywords of a synthetic detached label, before any overrides, as they are written
+LABEL_KEYWORDS: dict[str, str] = {
+    'INSTRUMENT_HOST_NAME'        : '"NEW HORIZONS"',
+    'INSTRUMENT_ID'               : '"LORRI"',
+    'TARGET_NAME'                 : '"JUPITER"',
+    'START_TIME'                  : '2007-01-10T05:41:08.363',
+    'STOP_TIME'                   : '2007-01-10T05:41:13.363',
+    'SPACECRAFT_CLOCK_START_COUNT': '"0030713585:49000"',
+    'SPACECRAFT_CLOCK_STOP_COUNT' : '"0030713590:49000"',
+    'EXPOSURE_DURATION'           : '5.000 <s>',
+}
+
+
+def write_label(path: pathlib.Path, image: str | None, *, lines: int | None = 1024,
+                extra: tuple[str, ...] = (), **keywords: str | None) -> pathlib.Path:
     """Write a detached PDS3 label pointing at `image` and return its path.
 
-    The label gives the values that an astrometry read takes from it, and an IMAGE object
-    of the given number of lines. With `image` None, the label has no ``^IMAGE`` pointer.
+    The label gives :data:`LABEL_KEYWORDS`, which `keywords` override; a value is written
+    as given, so a string needs its quotes, and None leaves the keyword out. `extra`
+    lines follow them, and then an IMAGE object of the given number of lines (no LINES
+    if `lines` is None). With `image` None, the label has no ``^IMAGE`` pointer.
     """
 
     text = ['PDS_VERSION_ID = PDS3',
@@ -107,17 +123,13 @@ def write_label(path: pathlib.Path, image: str | None, *, host: str = 'NEW HORIZ
             'RECORD_BYTES = 2880']
     if image is not None:
         text.append(f'^IMAGE = ("{image}", 1)')
-    text += [f'INSTRUMENT_HOST_NAME = "{host}"',
-             f'INSTRUMENT_ID = "{instrument}"',
-             f'TARGET_NAME = "{target}"',
-             'START_TIME = 2007-01-10T05:41:08.363',
-             'STOP_TIME = 2007-01-10T05:41:13.363',
-             'SPACECRAFT_CLOCK_START_COUNT = "0030713585:49000"',
-             'SPACECRAFT_CLOCK_STOP_COUNT = "0030713590:49000"',
-             'EXPOSURE_DURATION = 5.000 <s>',
-             'OBJECT = IMAGE',
-             f'  LINES = {lines}',
-             f'  LINE_SAMPLES = {lines}',
+    text += [f'{key} = {value}' for (key, value) in (LABEL_KEYWORDS | keywords).items()
+             if value is not None]
+    text += list(extra)
+    text += ['OBJECT = IMAGE']
+    if lines is not None:
+        text += [f'  LINES = {lines}']
+    text += ['  LINE_SAMPLES = 1024',
              'END_OBJECT = IMAGE',
              'END', '']
     path.write_text('\r\n'.join(text))

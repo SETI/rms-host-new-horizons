@@ -1,7 +1,9 @@
 ##########################################################################################
 # tests/oops/test_lorri_files.py
 ##########################################################################################
-"""Tests that a LORRI FITS file, its PDS3 label, and its index row give the same Snapshot.
+"""Tests that a LORRI FITS file, its PDS3 label, and its index row give the same Snapshot
+wherever the label and the FITS header agree, and that a label's Snapshot follows the
+resolution rules where they do not.
 
 The files in ``test_files`` are cut down from NHJULO_1001 and NHJULO_2001,
 data/20070110_003071/lor_0030713591_0x633: the raw (``eng``) product is unchanged, the
@@ -62,8 +64,8 @@ def label_value(product: str, keyword: str) -> str:
                                        'binning_mode', 'label_target',
                                        'spacecraft_clock_start_count',
                                        'spacecraft_clock_stop_count', 'filepath',
-                                       'basename', 'abspath', 'image_url', 'dict',
-                                       'spice_kernels', 'spice_frame_name',
+                                       'basename', 'abspath', 'image_url',
+                                       'header_dict', 'spice_kernels', 'spice_frame_name',
                                        'spice_frame_id', 'calibrations', 'shape'])
 def test_attribute_matches_the_fits_file(product: str, source: str,
                                          attribute: str) -> None:
@@ -129,8 +131,23 @@ def test_raw_product_shape() -> None:
 
 def test_raw_product_has_no_error_or_quality() -> None:
     obs = load('eng', 'fit')
-    assert obs.error is None
-    assert obs.quality is None
+    assert 'error' not in obs.subfields
+    assert 'quality' not in obs.subfields
+
+
+@pytest.mark.parametrize('product', PRODUCTS)
+@pytest.mark.parametrize('source', INPUTS)
+def test_dict_matches_the_fits_file(product: str, source: str) -> None:
+    from_fits = load(product, 'fit').dict
+    dict_ = load(product, source).dict
+    assert {key: dict_[key] for key in from_fits} == from_fits
+
+
+@pytest.mark.parametrize('product', PRODUCTS)
+def test_dict_of_the_label_adds_the_label(product: str) -> None:
+    obs = load(product, 'lbl')
+    assert obs.dict['PRODUCT_ID'] == f'LOR_0030713591_0X633_{product.upper()}'
+    assert obs.label_dict['TARGET_NAME'] == 'J17 CALLIRRHOE'
 
 
 def test_calibrated_product_error_and_quality() -> None:
@@ -140,8 +157,10 @@ def test_calibrated_product_error_and_quality() -> None:
         assert np.array_equal(obs.quality, hdulist[2].data)
 
 
-def test_target() -> None:
-    obs = load('sci', 'fit')
+# The label's catalog name "J17 CALLIRRHOE" is not a SPICE body name; the header's is
+@pytest.mark.parametrize('source', ['fit', 'lbl'])
+def test_target(source: str) -> None:
+    obs = load('sci', source)
     assert obs.target == 'CALLIRRHOE'
     assert label_value('sci', 'TARGET_NAME') == 'J17 CALLIRRHOE'
 

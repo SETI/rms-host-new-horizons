@@ -76,24 +76,28 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
 # Features
 
 - `NewHorizonsLORRI.from_file()` makes a `Snapshot` from a raw or calibrated LORRI
-  image. Every value comes from the FITS file, so the FITS file and its PDS3 label give
-  the same `Snapshot`, and its path names the FITS file either way. The image array is
-  the one the file stores; a calibrated image also carries its error estimates and
-  quality flags. `astrometry=True` reads no image data, and given a PDS3 label it reads
-  the label alone, without the FITS file; the times are then the label's, given to the
-  millisecond.
-- The exposure is centered on the middle of the exposure that the FITS header gives. The
-  spacecraft clock counts at the start and end of the exposure are given as they appear
-  in the PDS3 label.
+  image, given its FITS file or its PDS3 label. Given the FITS file, it reads only that
+  file. Given the label, it reads the label and the FITS file beside it, and takes the
+  metadata from both. Its path names the FITS file either way. The image array is the
+  one the file stores; a calibrated image also carries its error estimates and quality
+  flags. `astrometry=True` reads no image data, and given a PDS3 label it reads the label
+  alone, without the FITS file.
+- Where the label and the FITS header disagree, a rule for each value chooses the better
+  one. For example, the target is the name that SPICE knows: the header's "CALLIRRHOE"
+  rather than the label's "J17 CALLIRRHOE", but the label's "KERBEROS" rather than the
+  header's "RADEC=270.66,-14.63=P4". The exposure times are the header's, which the label
+  gives rounded to the millisecond. A value that neither gives is left out rather than
+  set to None.
+- The spacecraft clock counts at the start and end of the exposure are given as they
+  appear in the PDS3 label.
 - The pointing comes from the C kernels, or from the FITS header with
   `pointing='fits'`; the spacecraft's position comes from the SP kernels, or from the
   FITS header with `geom='fits'`. The camera distortion is modeled by a polynomial,
   which `fov_type='flat'` replaces with an undistorted field of view.
 - `NewHorizonsLORRI.from_index()` makes one `Snapshot` for each row of a volume index.
   It merges in the columns of the supplemental index, whose rows must list the same
-  products in the same order: each pair of rows must agree in VOLUME_ID and
-  FILE_SPECIFICATION_NAME. Where both tables give a column, the supplement's value is
-  kept.
+  products, matched on VOLUME_ID and FILE_SPECIFICATION_NAME in any order. Where both
+  tables give a column, the supplement's value is kept.
 
 Details are available in the
 [module documentation](https://rms-host-new-horizons.readthedocs.io/en/latest/module.html).

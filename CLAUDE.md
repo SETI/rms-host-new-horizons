@@ -66,31 +66,37 @@ described below.
 - `_NewHorizons` is never instantiated; all its state lives in class attributes. Its
   `initialize()` furnishes every kernel through spicedb at once, for the whole period
   `START_TIME` to `STOP_TIME`, or a metakernel instead; there is no monthly loading.
-- Every value of a `from_file()` Snapshot comes from the FITS file. Given a PDS3 label,
-  the host only follows its `^IMAGE` pointer to the FITS file (`_fits_path()`, which tries
-  the case of the label's own name first), so the two inputs give identical Snapshots and
-  the path subfields always name the FITS file. The host opens FITS files itself
+- What `from_file()` reads follows the operator's rules of 2026-11-18, shared by the four
+  hosts: a FITS input reads the FITS file alone; a label input reads the label and the
+  FITS file its `^IMAGE` names (`_fits_path()`, which tries the case of the label's own
+  name first), except that an astrometry read of a label reads the label alone and needs
+  no FITS file (and refuses `geom` or `pointing` from the header with `HostError`). The
+  path subfields always name the FITS file. The host opens FITS files itself
   (`_open_fits()`), because `oops.Host._read_fileinfo()` leaves a FITS file of another
   host open, and closes every HDUList once the arrays and headers are copied out of it,
-  including one passed in.
-- Hosts read only what they need (operator ruling, 2026-11-17). A FITS input never reads
-  the detached label. A label input opens the FITS file for the pixels and the header in a
-  full read, but an astrometry read of a label (`_snapshot_from_label()`) reads the label
-  alone and needs no FITS file: its times come from START_TIME and EXPOSURE_DURATION, its
-  target from TARGET_NAME and its clock counts from the label, the FITS-only `headers` is
-  absent, and `geom` or `pointing` from the header is refused. The C1 equality of the two
-  inputs holds for full reads. Labels and index rows share `_snapshot_from_dict()`.
-- The clock counts come from the FITS header: `SPCSCLK0` for the start and `STOPMET`,
-  converted by `_sclk_from_met()`, for the end. Both match the PDS3 label's spelling on
-  every archive product checked.
-- `from_index()` reads the team's volume index with the supplement beside it
-  (`oops.Host.SUPPLEMENT`), which must exist. The tables write their shared columns
-  differently (the index gives clock counts with a partition and rounds the stop count
-  differently), so `_match_index_rows()` matches rows on `VOLUME_ID` and
-  `FILE_SPECIFICATION_NAME` and copies the supplement's row into the index's before the
-  merge, so that the supplement, which follows the labels, wins every shared column.
-  `oops.Host.from_index()` reads the rows itself with the default validation, which
-  compares every shared column, so it fails on these indexes.
+  including one passed in. Labels are parsed by `_parse_label()`, which falls back from
+  "fast" to "strict" to "loose".
+- The metadata come from every source read. `_items_from_pds3()` and
+  `_items_from_header()` give each source's items under PDS3 names (START_TIME in seconds
+  TDB, the FITS start being SPCSCET - EXPTIME/2; STOPMET converted by `_sclk_from_met()`),
+  leaving out missing and null values (`_NULL_VALUES`), and `_merge_items()` merges them.
+  Where both give an item and the values differ, `_RESOLUTION_RULES` chooses; each rule's
+  comment cites the survey evidence and the issue that records the difference. Every
+  computed value (times, FOV, target) comes from the merged items. Nothing missing is
+  None: a subfield or `dict` key with no value is absent, as are `error` and `quality` on
+  a raw product. `dict` is the merged items plus every other key of each source;
+  `label_dict` and `header_dict` are the raw sources.
+- With the pointing from the C kernels, `from_file()` evaluates the camera frame at
+  mid-exposure (`_check_pointing()`) and raises `HostError` with the SPICE error code if
+  the kernels give none. `from_index()` does not, so that one image without pointing does
+  not stop the whole index.
+- `from_index()` reads the team's volume index with the supplement beside it, which must
+  exist. `_read_index_and_supplement()` matches rows on `VOLUME_ID` and
+  `FILE_SPECIFICATION_NAME` in any order (the NHJULO_1001 supplement lists two rows out of
+  the index's order), and the supplement, which follows the labels, wins every shared
+  column (the index gives clock counts with a partition and rounds the stop count
+  differently). `oops.Host.from_index()` reads the rows itself with the default
+  validation, which compares every shared column, so it fails on these indexes.
 - The camera frame `NH_LORRI` is a `Cmatrix` that flips the y and z axes of the SPICE
   frame, registered as `NH_LORRI_FLIPPED`, because the instrument kernel gives the
   boresight along -Z. `_define_camera_frame()` registers both lazily, and only when the
