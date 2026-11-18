@@ -566,20 +566,32 @@ def test_fitsapp_pointing_with_motion(tmp_path: pathlib.Path,
 ##########################################################################################
 
 
-@pytest.mark.parametrize(('label_name', 'pointer', 'fits_name'), [
-    ('lor_test.lbl', 'LOR_TEST.FIT', 'lor_test.fit'),
-    ('LOR_TEST.LBL', 'lor_test.fit', 'LOR_TEST.FIT'),
-    ('Lor_Test.lbl', 'Lor_Test.fit', 'Lor_Test.fit'),
-    ('Lor_Test.lbl', 'LOR_TEST.FIT', 'lor_test.fit'),
-    ('Lor_Test.lbl', 'lor_test.fit', 'LOR_TEST.FIT'),
+def ignores_case(directory: pathlib.Path) -> bool:
+    """True if the file system of `directory` ignores the case of file names."""
+
+    probe = directory / 'case_probe'
+    probe.write_text('')
+    return (directory / 'CASE_PROBE').exists()
+
+
+# On a file system that ignores case, the first spelling tried is found whatever the case
+# of the file, so the last two cases find the name as the label writes it
+@pytest.mark.parametrize(('label_name', 'pointer', 'fits_name', 'found_ignoring_case'), [
+    ('lor_test.lbl', 'LOR_TEST.FIT', 'lor_test.fit', 'lor_test.fit'),
+    ('LOR_TEST.LBL', 'lor_test.fit', 'LOR_TEST.FIT', 'LOR_TEST.FIT'),
+    ('Lor_Test.lbl', 'Lor_Test.fit', 'Lor_Test.fit', 'Lor_Test.fit'),
+    ('Lor_Test.lbl', 'LOR_TEST.FIT', 'lor_test.fit', 'LOR_TEST.FIT'),
+    ('Lor_Test.lbl', 'lor_test.fit', 'LOR_TEST.FIT', 'lor_test.fit'),
 ])
 def test_from_file_label_finds_the_fits_file(tmp_path: pathlib.Path, label_name: str,
-                                             pointer: str, fits_name: str) -> None:
+                                             pointer: str, fits_name: str,
+                                             found_ignoring_case: str) -> None:
+    expected = found_ignoring_case if ignores_case(tmp_path) else fits_name
     write_fits(tmp_path / fits_name)
     label = write_label(tmp_path / label_name, pointer)
     obs = NewHorizonsLORRI.from_file(label)
-    assert obs.basename == fits_name
-    assert obs.filepath == FCPath(tmp_path / fits_name)
+    assert obs.basename == expected
+    assert obs.filepath == FCPath(tmp_path / expected)
 
 
 def test_from_file_label_gives_the_fits_snapshot(tmp_path: pathlib.Path) -> None:
