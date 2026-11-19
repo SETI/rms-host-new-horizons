@@ -113,7 +113,7 @@ _INDEX_KEYS = ('VOLUME_ID', 'FILE_SPECIFICATION_NAME')
 # The table reader masks a value equal to its column's constant. A masked -999 (angles)
 # or -999999 (the approximate pixel of the target) is never a real value, and neither is
 # a masked zero distance; but zero is also the constant of the components of vectors, and
-# there a zero can be real. A scan of the 43,407 rows of the 14 volume supplements
+# there a zero can be real. A scan of the 43,441 rows of the 14 volume supplements
 # (2026-11-19) found:
 # - The vectors from the spacecraft to the target and from the target to the Sun, the
 #   distance of each, and the target's velocity are all zero in the 5,207 rows of images
@@ -415,7 +415,8 @@ class NewHorizonsLORRI(oops.Host):
               of the target from the Sun at mid-exposure in AU, from the SP kernels.
               The list is empty for a raw product, for an astrometry read of a label,
               for an exposure of zero, and if the target (after the `target` override)
-              is "NONE", has no path, or has no position in the kernels at that time.
+              is "NONE" or the Sun, has no path, or has no position in the kernels at
+              that time.
             - `data`: the primary image as stored, which in a raw product includes the
               columns beyond the field of view, unless `astrometry` is True.
             - `error` and `quality`: the error estimates and quality flags of a
@@ -1443,8 +1444,8 @@ class NewHorizonsLORRI(oops.Host):
             pi r^2 / (texp RSOLAR F), in which r is the distance of the target from the
             Sun at `tdb` in AU from the SP kernels and F the solar flux at 1 AU; empty
             if the header gives no RSOLAR, as for a raw product, if the exposure is
-            zero, or if the target has no path or the kernels do not give its position
-            at `tdb`.
+            zero, if the target has no path or the kernels do not give its position at
+            `tdb`, or if the target is the Sun, for which I/F has no meaning.
         """
 
         rsolar = header_dict.get('RSOLAR')
@@ -1460,6 +1461,8 @@ class NewHorizonsLORRI(oops.Host):
             return []
 
         solar_range = event.pos.norm().vals / _AU
+        if solar_range == 0.:
+            return []
         factor = np.pi * solar_range**2 / (texp * rsolar * _SOLAR_FLUX)
         return [oops.calibration.FlatCalib('I/F', factor)]
 

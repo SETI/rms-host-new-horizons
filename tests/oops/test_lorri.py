@@ -437,6 +437,13 @@ def test_zero_exposure_has_no_calibration(tmp_path: pathlib.Path, sun_path: oops
     assert obs.calibrations == []
 
 
+# I/F is not defined for the Sun itself, which is zero AU from the Sun
+def test_image_of_the_sun_has_no_calibration(tmp_path: pathlib.Path,
+                                             sun_path: oops.Path) -> None:
+    obs = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR, 'SPCCBTNM': 'SUN'})
+    assert obs.calibrations == []
+
+
 # The target's solar range cannot be found for no target, or for one with no path
 @pytest.mark.parametrize('target', ['---', 'CALLIRRHOE'])
 def test_target_without_a_path_has_no_calibration(tmp_path: pathlib.Path,
