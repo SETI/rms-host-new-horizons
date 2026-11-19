@@ -360,6 +360,14 @@ def test_from_file_dict_leaves_out_null_values(tmp_path: pathlib.Path) -> None:
     assert obs.header_dict['CB3LOAD'] == '---'
 
 
+# The FITS header writes -1e32 for a value it cannot compute, such as the Sun's distance
+# from a target it has no ephemeris for
+def test_from_file_dict_leaves_out_the_fits_fill_value(tmp_path: pathlib.Path) -> None:
+    obs = load(tmp_path, fits_keywords={'SPCTSORN': -1.e32})
+    assert 'SPCTSORN' not in obs.dict
+    assert obs.header_dict['SPCTSORN'] == -1.e32
+
+
 def test_from_file_headers(tmp_path: pathlib.Path) -> None:
     obs = load(tmp_path)
     assert [header.get('EXTNAME') for header in obs.headers] == [

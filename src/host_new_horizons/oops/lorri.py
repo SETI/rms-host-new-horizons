@@ -96,6 +96,13 @@ _HEADER_TARGET_NAMES = {
 # `label_dict`, `header_dict` and `headers`, but nowhere else.
 _NULL_VALUES = ('', 'UNK', 'N/A', 'NULL', '---', 'UNKNOWN')
 
+# The number that the FITS header writes for a value its pipeline cannot compute, such as
+# the target geometry of an image without a target (SPCTSORN, SPCTRANG, ...) or the
+# body-fixed coordinates of a body without a rotation model (SPCTSCLA, ...); the label
+# gives "N/A" for the same values. It too counts as missing, and stays in `header_dict`
+# and `headers`.
+_FITS_FILL = -1.e32
+
 # The ticks of the New Horizons spacecraft clock per second
 _SCLK_TICKS = 50000
 
@@ -288,7 +295,8 @@ class NewHorizonsLORRI(oops.Host):
         - The lines of the image: NAXIS2, the LINES of the label's IMAGE object.
 
         A value counts as missing if it is "UNK", "N/A", "NULL", "---", "UNKNOWN" or
-        blank, ignoring case, or a list of such values. Where only one source gives an
+        blank, ignoring case, the FITS header's fill value -1e32, or a list of such
+        values. Where only one source gives an
         item, its value is used. Where both give it and the values differ, each item
         takes the value of one source, the same for every image:
 
@@ -1211,12 +1219,14 @@ class NewHorizonsLORRI(oops.Host):
 
         Returns:
             bool: True if `value` is None, as for an undefined FITS card; one of
-            :data:`_NULL_VALUES`, ignoring case and surrounding blanks; or a list or
-            tuple whose elements are all missing.
+            :data:`_NULL_VALUES`, ignoring case and surrounding blanks; the FITS fill
+            value :data:`_FITS_FILL`; or a list or tuple whose elements are all missing.
         """
 
         if value is None:
             return True
+        if isinstance(value, float):
+            return value == _FITS_FILL
         if isinstance(value, str):
             return value.strip().upper() in _NULL_VALUES
         if isinstance(value, (list, tuple)):
