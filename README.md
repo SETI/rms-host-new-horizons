@@ -91,8 +91,10 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
   null values, such as "N/A" and "UNKNOWN".
 - The target body comes from the target name by fixed translations of the label's forms
   of names: "J17 CALLIRRHOE" gives CALLIRRHOE, "136472 MAKEMAKE" gives MAKEMAKE, and
-  "ASTEROID 486958 (2014 MU69)" gives ARROKOTH. Any other name is used as it is, whether
-  or not SPICE knows it.
+  "ASTEROID 486958 (2014 MU69)" gives ARROKOTH, as does the FITS header's "MU69". A name
+  that begins with "PLUTO", such as "PLUTO-CHARON", gives PLUTO, and no name or
+  "CALIBRATION" gives NONE. Any other name is used as it is, whether or not SPICE knows
+  it.
 - The spacecraft clock counts at the start and end of the exposure are spelled as the
   PDS3 label spells them. They come from the label, or from the FITS header (its start
   count, and its end time converted to a count) when the label is not read or gives
@@ -107,8 +109,10 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
   which `fov_type='flat'` replaces with an undistorted field of view.
 - A calibrated image carries an I/F calibration, built from the conversion factor its
   FITS header gives for a solar spectrum (RSOLAR), the exposure, and the target's
-  distance from the Sun in the SPICE kernels. A raw image, an image without a target the
-  kernels can place, and an index row have none.
+  distance from the Sun in the SPICE kernels. A raw image, an astrometry read of a label
+  alone (which reads no FITS header), an exposure of zero, an image of the Sun, an image
+  without a target the kernels can place, and an index row have none, unless the caller
+  passes `calibrations`.
 - `NewHorizonsLORRI.from_index()` makes one `Snapshot` for each row of a volume index.
   It merges in the columns of the supplemental index, whose rows must list the same
   products, matched on VOLUME_ID and FILE_SPECIFICATION_NAME in any order. Where both

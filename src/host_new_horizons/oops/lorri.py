@@ -412,7 +412,8 @@ class NewHorizonsLORRI(oops.Host):
               image's DN to I/F, pi r^2 DN / (texp RSOLAR F). Here RSOLAR converts DN/s
               per pixel to the radiance of a solar spectrum, F = 176 erg/cm^2/s/A is the
               solar flux at 1 AU at the pivot wavelength of LORRI, and r is the distance
-              of the target from the Sun at mid-exposure in AU, from the SP kernels.
+              of the target from the Sun at mid-exposure (the middle of `cadence`, if it
+              is given) in AU, from the SP kernels.
               The list is empty for a raw product, for an astrometry read of a label,
               for an exposure of zero, and if the target (after the `target` override)
               is "NONE" or the Sun, has no path, or has no position in the kernels at
@@ -1034,11 +1035,12 @@ class NewHorizonsLORRI(oops.Host):
                 and not params['abspath'].exists()):
             del params['abspath']
 
-        # The I/F calibration of a calibrated product, for the target that the overrides
-        # leave
+        # The I/F calibration of a calibrated product, for the target and at the midtime
+        # that the overrides leave
         if overrides['calibrations'] is None and header_dict is not None:
             params['calibrations'] = NewHorizonsLORRI._iof_calibrations(
-                header_dict, texp, target=params['target'], tdb=cadence.midtime)
+                header_dict, texp, target=params['target'],
+                tdb=params['cadence'].midtime)
 
         obs = oops.observation.Snapshot(('v', 'u'), **params)
         if arrays is not None:

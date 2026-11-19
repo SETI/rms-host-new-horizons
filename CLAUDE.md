@@ -96,10 +96,12 @@ described below.
   `objects`); a repeated FITS keyword is keyed `NAME[n]` (`_header_cards()`), as the
   VICAR hosts key a repeated parameter. If no source gives the start time, it comes from
   SPACECRAFT_CLOCK_START_COUNT through the clock kernel (`_add_start_time_from_clock()`).
-- `calibrations` holds one `FlatCalib('I/F', ...)` when the FITS header gives RSOLAR (a
-  calibrated product): pi r^2 / (texp RSOLAR 176), r the target's solar range in AU from
-  the SP kernels (`_iof_calibrations()`). It is empty for a raw product, a label-only
-  read, a zero exposure, a target with no path or no ephemeris, and every index row.
+- By default, `calibrations` holds one `FlatCalib('I/F', ...)` when the FITS header gives
+  RSOLAR (a calibrated product): pi r^2 / (texp RSOLAR 176), r the target's solar range
+  in AU from the SP kernels at the Snapshot's midtime (`_iof_calibrations()`). The
+  default is empty for a raw product, a label-only read, a zero exposure, the Sun (zero
+  AU from itself), a target with no path or no ephemeris, and every index row. A
+  `calibrations` override replaces it in `from_file()` and `from_index()` alike.
 - With the pointing from the C kernels, `from_file()` evaluates the camera frame at
   mid-exposure (`_check_pointing()`) and raises `oops.OopsSpiceError` with the SPICE error
   code if the kernels give none; it catches only the classes cspyce raises. It does not

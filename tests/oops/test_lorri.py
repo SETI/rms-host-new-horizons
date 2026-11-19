@@ -418,6 +418,18 @@ def test_from_file_calibration_follows_the_target(tmp_path: pathlib.Path,
         4. * jupiter.calibrations[0].factor.vals)
 
 
+# The target recedes from the Sun at 1e6 km/s, so it is twice as far 1000 s later
+def test_from_file_calibration_at_the_cadence_override(tmp_path: pathlib.Path,
+                                                       sun_path: oops.Path) -> None:
+    oops.path.LinearPath((oops.Vector3((1.e9, 0., 0.)), oops.Vector3((1.e6, 0., 0.))),
+                         MIDTIME, 'SSB', frame='J2000', path_id='JUPITER')
+    default = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR})
+    later = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR},
+                 cadence=oops.cadence.SnapCadence(MIDTIME + 1000. - TEXP / 2., TEXP))
+    assert later.calibrations[0].factor.vals == pytest.approx(
+        4. * default.calibrations[0].factor.vals)
+
+
 def test_raw_product_has_no_calibration(tmp_path: pathlib.Path, sun_path: oops.Path,
                                         jupiter_path: oops.Path) -> None:
     obs = load(tmp_path, fits_keywords={'RSOLAR': None})
