@@ -89,12 +89,15 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
   header's target name is the data pipeline's guess, such as "FJUPITER" for Jupiter. A
   value that neither gives is left out rather than set to None, and so are the archive's
   null values, such as "N/A" and "UNKNOWN".
-- The target body is the name SPICE knows the body by, translated from the label's form
-  of the name: "J17 CALLIRRHOE" gives CALLIRRHOE, "136472 MAKEMAKE" gives MAKEMAKE, and
-  "ASTEROID 486958 (2014 MU69)" gives ARROKOTH.
-- The spacecraft clock counts at the start and end of the exposure are given as they
-  appear in the PDS3 label. The metadata, the PDS3 label, and the FITS headers are
-  published as dictionaries that can be written as JSON.
+- The target body comes from the target name by fixed translations of the label's forms
+  of names: "J17 CALLIRRHOE" gives CALLIRRHOE, "136472 MAKEMAKE" gives MAKEMAKE, and
+  "ASTEROID 486958 (2014 MU69)" gives ARROKOTH. Any other name is used as it is, whether
+  or not SPICE knows it.
+- The spacecraft clock counts at the start and end of the exposure are spelled as the
+  PDS3 label spells them. They come from the label, or from the FITS header (its start
+  count, and its end time converted to a count) when the label is not read or gives
+  none. The metadata, the PDS3 label, and the FITS headers are published as dictionaries
+  that can be written as JSON.
 - An image whose pointing the C kernels do not cover raises `oops.OopsSpiceError`, with
   the SPICE error code in its message. Giving a frame, or taking the pointing from the
   FITS header, skips that check.

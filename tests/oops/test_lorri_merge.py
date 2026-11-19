@@ -24,6 +24,9 @@ from host_new_horizons.oops.lorri import (_FITS_ITEM_KEYWORDS, _WINNING_SOURCE,
 FITS_START = FITS_HEADER['SPCSCET'] - FITS_HEADER['EXPTIME'] / 2.
 LABEL_START = julian.tdb_from_tai(julian.tai_from_iso('2007-01-10T05:41:08.363'))
 
+# The middle of the exposure in the synthetic FITS header
+MIDTIME = FITS_HEADER['SPCSCET']
+
 
 def label_and_fits(tmp_path: pathlib.Path, *, fits_keywords: dict[str, Any] | None = None,
                    lines: int | None = 1024, **label_keywords: Any) -> pathlib.Path:
@@ -91,6 +94,9 @@ def test_label_dict_writes_a_set_as_a_list(tmp_path: pathlib.Path) -> None:
 @pytest.mark.parametrize('subfield', ['dict', 'label_dict', 'header_dict', 'headers'])
 def test_metadata_subfields_are_json(tmp_path: pathlib.Path, suffix: str,
                                      astrometry: bool, subfield: str) -> None:
+    """Each metadata subfield of each read survives a JSON round trip; a subfield that a
+    read does not give is checked as empty."""
+
     write_fits(tmp_path / 'lor_test.fit', COMMENT='a comment')
     write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT',
                 PRODUCT_CREATION_TIME='2016-10-31T00:00:00',
@@ -313,8 +319,9 @@ def test_undefined_header_card_counts_as_missing(tmp_path: pathlib.Path) -> None
 @pytest.mark.parametrize('dt', [0., 1.])
 def test_fits_geometry_uses_the_header_epoch(tmp_path: pathlib.Path,
                                              sun_path: oops.Path, dt: float) -> None:
-    # The header's position and velocity are those at SPCSCET; a velocity of 1000 km/s
-    # makes an epoch even 1 microsecond off show as 1 m
+    """The header's position and velocity are those at SPCSCET, not at the observation's
+    midtime; a velocity of 1000 km/s makes an epoch even 1 microsecond off show as 1 m."""
+
     velocity = {'SPCSSCVX': 1000., 'SPCSSCVY': 0., 'SPCSSCVZ': 0.}
     obs = from_label(tmp_path, START_TIME='2007-01-10T05:41:10.363', geom='fits',
                      fits_keywords=velocity)
@@ -382,10 +389,12 @@ def test_fits_file_without_a_needed_item(tmp_path: pathlib.Path, keyword: str,
     ({'START_TIME': None}, 1024, 'no START_TIME for LORRI image .*lor_test.fit'),
     ({'EXPOSURE_DURATION': None}, 1024, 'no EXPOSURE_DURATION for LORRI image'),
     ({}, None, 'no lines of the image'),
+    ({}, '"N/A"', 'no lines of the image'),
 ])
 def test_label_astrometry_without_a_needed_item(tmp_path: pathlib.Path,
                                                 keywords: dict[str, Any],
-                                                lines: int | None, message: str) -> None:
+                                                lines: int | str | None,
+                                                message: str) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', lines=lines,
                         **keywords)
     with pytest.raises(oops.host.HostFormatError, match=message):
@@ -501,6 +510,8 @@ def test_missing_pointing_error_attributes(tmp_path: pathlib.Path,
 def test_each_spice_exception_class_is_missing_pointing(
         tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
         error: type[Exception]) -> None:
+    """Every class of exception that cspyce raises becomes OopsSpiceError."""
+
     path = write_fits(tmp_path / 'lor_test.fit')
     no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT)', error)
     with pytest.raises(oops.OopsSpiceError):
@@ -532,6 +543,24 @@ def test_from_index_never_checks_pointing(monkeypatch: pytest.MonkeyPatch) -> No
            'BINNING_MODE': '1x1'}
     (obs,) = NewHorizonsLORRI.from_index('index.lbl', row_dicts=[row])
     assert obs.basename == 'lor_test.fit'
+
+
+@pytest.mark.parametrize(('options', 'expected'), [
+    ({'timeshift': (3., 'T')}, MIDTIME + 3.),
+    ({'timeshift': (3., 'PT')}, MIDTIME + 3.),
+    ({'timeshift': (3., 'F')}, MIDTIME),
+    ({'timeshift': (3., 't'), 'cadence': oops.cadence.SnapCadence(1000., 10.)}, 1008.),
+])
+def test_pointing_is_checked_at_the_shifted_midtime(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, options: dict[str, Any],
+        expected: float) -> None:
+    """A time shift of the cadence ("T") moves the time the pointing is checked at."""
+
+    times = []
+    monkeypatch.setattr(NewHorizonsLORRI, '_check_pointing',
+                        staticmethod(lambda tdb, filepath: times.append(tdb)))
+    NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), **options)
+    assert times == [pytest.approx(expected, abs=1.e-6)]
 
 
 def test_pointing_is_checked_at_the_cadence_override(

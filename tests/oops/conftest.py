@@ -108,7 +108,7 @@ LABEL_KEYWORDS: dict[str, str] = {
 }
 
 
-def write_label(path: pathlib.Path, image: str | None, *, lines: int | None = 1024,
+def write_label(path: pathlib.Path, image: str | None, *, lines: int | str | None = 1024,
                 extra: tuple[str, ...] = (), **keywords: str | None) -> pathlib.Path:
     """Write a detached PDS3 label pointing at `image` and return its path.
 

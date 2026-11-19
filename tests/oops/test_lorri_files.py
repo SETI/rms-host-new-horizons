@@ -150,6 +150,9 @@ def test_dict_matches_the_fits_file(product: str, source: str) -> None:
     ('fit', 'CALLIRRHOE'), ('host_fit', 'CALLIRRHOE'),
     ('lbl', 'J17 CALLIRRHOE'), ('host_lbl', 'J17 CALLIRRHOE')])
 def test_target_name_of_each_input(product: str, source: str, name: str) -> None:
+    """Each input keeps the target name as its labels give it, in `label_target` and in
+    `dict`; the body it translates to is tested by test_target."""
+
     obs = load(product, source)
     assert obs.label_target == name
     assert obs.dict['TARGET_NAME'] == name

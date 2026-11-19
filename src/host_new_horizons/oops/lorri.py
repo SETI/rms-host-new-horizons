@@ -587,8 +587,9 @@ class NewHorizonsLORRI(oops.Host):
         Raises:
             FileNotFoundError: If the supplement does not exist.
             oops.OopsValueError: If `fov_type` is not "fast", "slow" or "flat".
-            oops.host.HostFormatError: If a row's BINNING_MODE is not "1X1" or "4X4", or
-                if a row gives no START_TIME or EXPOSURE_DURATION.
+            oops.host.HostFormatError: If a row's BINNING_MODE is missing or not "1X1"
+                or "4X4" in either case, or if a row gives no START_TIME or
+                EXPOSURE_DURATION.
             oops.host.HostIndexError: If the supplement and the index do not list the
                 same files, each once, or if `supplement` is not specified and the name
                 of `filepath` contains no "_index".
@@ -839,8 +840,9 @@ class NewHorizonsLORRI(oops.Host):
             raw_label_dict = label.as_dict()
             label_dict = NewHorizonsLORRI._label_as_json(raw_label_dict)
             label_items = NewHorizonsLORRI._items_from_pds3(raw_label_dict)
-            if 'LINES' in raw_label_dict.get('IMAGE', {}):
-                label_items['LINES'] = raw_label_dict['IMAGE']['LINES']
+            lines = raw_label_dict.get('IMAGE', {}).get('LINES')
+            if not NewHorizonsLORRI._is_missing(lines):
+                label_items['LINES'] = lines
 
         header_dict = None
         fits_items = {}
@@ -861,7 +863,7 @@ class NewHorizonsLORRI(oops.Host):
 
         tstart = items['START_TIME']
         texp = items['EXPOSURE_DURATION']
-        tdb_midtime = tstart + texp / 2.
+        cadence = oops.cadence.SnapCadence(tstart, texp)
         target_name = NewHorizonsLORRI._target_body(items.get('TARGET_NAME'))
 
         # Define the path and frame. A default that an override replaces is not built,
@@ -882,18 +884,18 @@ class NewHorizonsLORRI(oops.Host):
             default_frame = overrides['frame']
         elif pointing == 'spice':
             NewHorizonsLORRI._define_camera_frame()
-            check_time = (tdb_midtime if overrides['cadence'] is None
-                          else overrides['cadence'].midtime)
-            NewHorizonsLORRI._check_pointing(check_time, filepath)
+            NewHorizonsLORRI._check_pointing(
+                NewHorizonsLORRI._effective_midtime(cadence, overrides), filepath)
             default_frame = _SPICE_FRAME_NAME
         else:
+            # Only "fitsapp" needs the epoch, to evaluate the observer's path
             default_frame = NewHorizonsLORRI._fits_frame_from_header(
                 header, filepath, pointing=pointing, path=default_path,
-                tdb_midtime=header['SPCSCET'])
+                tdb_midtime=header.get('SPCSCET'))
 
         # Define the Snapshot parameters
         params = {
-            'cadence'     : oops.cadence.SnapCadence(tstart, texp),
+            'cadence'     : cadence,
             'fov'         : NewHorizonsLORRI._FOVS[binning_mode, fov_type],
             'path'        : default_path,
             'frame'       : default_frame,
@@ -955,21 +957,24 @@ class NewHorizonsLORRI(oops.Host):
             Snapshot: The observation, with the subfields listed for :meth:`from_index`.
 
         Raises:
-            oops.host.HostFormatError: If the row's BINNING_MODE is not "1X1" or "4X4",
-                or if the row gives no START_TIME or EXPOSURE_DURATION.
+            oops.host.HostFormatError: If the row's BINNING_MODE is missing or not "1X1"
+                or "4X4", or if the row gives no START_TIME or EXPOSURE_DURATION.
         """
 
         row_dict = NewHorizonsLORRI._row_as_json(row_dict)
-        binning_mode = row_dict['BINNING_MODE'].upper()
-        if binning_mode not in _BINNING_MODES.values():
-            raise oops.host.HostFormatError(f'unrecognized LORRI BINNING_MODE: '
-                                            f'{row_dict["BINNING_MODE"]!r}')
 
         # The index names the label; the observation names the FITS file beside it
         label_name = row_dict['FILE_SPECIFICATION_NAME']
         stem, _, suffix = label_name.rpartition('.')
         fits_suffix = 'FIT' if suffix.isupper() else 'fit'
         filepath = row_dict['VOLUME_ID'] + '/' + stem + '.' + fits_suffix
+
+        # A null binning mode is missing from the row, and so unrecognized
+        binning_mode = str(row_dict.get('BINNING_MODE', '')).upper()
+        if binning_mode not in _BINNING_MODES.values():
+            given = repr(row_dict['BINNING_MODE']) if binning_mode else 'missing'
+            raise oops.host.HostFormatError(f'unrecognized LORRI BINNING_MODE: {given} '
+                                            f'in {filepath}')
 
         items = NewHorizonsLORRI._items_from_pds3(row_dict)
         for name in ('EXPOSURE_DURATION', 'START_TIME'):
@@ -1000,6 +1005,28 @@ class NewHorizonsLORRI(oops.Host):
                                                   target=target_name, ck=using_cks,
                                                   return_all_planets=return_all_planets)
         return obs
+
+    @staticmethod
+    def _effective_midtime(cadence, overrides):
+        """The midtime of the observation once the overrides are applied.
+
+        Parameters:
+            cadence (oops.Cadence): The cadence that the metadata give.
+            overrides (dict[str, Any]): The values of the standard overrides, as described
+                for :meth:`from_file`.
+
+        Returns:
+            float: The middle of the `cadence` override if it is given, otherwise of
+            `cadence`, in seconds TDB, shifted as a `timeshift` that names the cadence
+            ("T") shifts it.
+        """
+
+        if overrides['cadence'] is not None:
+            cadence = overrides['cadence']
+        timeshift = overrides['timeshift']
+        if timeshift is not None and 'T' in str(timeshift[1]).upper():
+            cadence = oops.cadence.TimeShift(timeshift[0], cadence)
+        return cadence.midtime
 
     @staticmethod
     def _check_pointing(tdb, filepath):

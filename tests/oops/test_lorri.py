@@ -1051,6 +1051,20 @@ def test_from_index_rejects_an_unknown_binning_mode() -> None:
         NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(BINNING_MODE='2x2')])
 
 
+@pytest.mark.parametrize('null', ['N/A', None])
+def test_from_index_rejects_a_missing_binning_mode(null: str | None) -> None:
+    with pytest.raises(oops.host.HostFormatError,
+                       match="unrecognized LORRI BINNING_MODE: missing in NHJULO_2001/"):
+        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(BINNING_MODE=null)])
+
+
+def test_from_file_fits_pointing_needs_no_header_epoch(tmp_path: pathlib.Path) -> None:
+    write_fits(tmp_path / 'lor_test.fit', SPCSCET=None)
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
+    obs = NewHorizonsLORRI.from_file(label, pointing='fits')
+    assert obs.frame.frame_id == '.NH_FRAME_lor_test.fit'
+
+
 def test_from_index_custom_frame_reports_no_cks(fake_spice: FakeSpice,
                                                 fake_spicedb: FakeSpiceDB) -> None:
     (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()], frame='J2000')
