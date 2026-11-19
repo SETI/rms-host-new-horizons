@@ -143,8 +143,8 @@ _WINNING_SOURCE = {
     # start that the label's own SPACECRAFT_CLOCK_START_COUNT gives through the spacecraft
     # clock kernel to 0.0001 ms; the label's START_TIME is that time rounded to the
     # millisecond, from 0.5 ms early to 0.5 ms late on every product. On frames taken
-    # while the spacecraft spun, the rounding moves the pointing at mid-exposure by up to
-    # 21 pixels (#13).
+    # while the spacecraft spun, in cruise as well as at launch, the rounding moves the
+    # pointing at mid-exposure by as much as 37 pixels (#13).
     'START_TIME': 'header',
 
     # EXPOSURE_DURATION: the header's. Both are accurate, matching the difference of the
