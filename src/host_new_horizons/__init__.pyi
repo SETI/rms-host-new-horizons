@@ -56,11 +56,14 @@ class NewHorizonsLORRI(Host):
         navigation: tuple[float, ...] | None = None, tracker: str | None = None,
         parallel: Observation | None = None, **kwargs: Any) -> Snapshot: ...
     # Every row is one Snapshot, so the list is typed more narrowly than Host's, which a
-    # list's invariance does not allow.
+    # list's invariance does not allow. supplement=None without row_dicts raises
+    # oops.host.HostIndexError, a select other than None raises oops.OopsValueError, and
+    # any keyword not listed raises oops.OopsTypeError.
     @staticmethod
     def from_index(  # type: ignore[override]
         filepath: str | pathlib.Path | FCPath, *,
-        supplement: str | pathlib.Path | FCPath | object | None = None,
+        supplement: str | pathlib.Path | FCPath | object | None = ...,
+        label: Pds3Label | None = None,
         row_dicts: list[dict[str, Any]] | None = None,
         pds3_options: dict[str, Any] | None = None,
         filter: dict[str, Any] | None = None, fov_type: str = 'fast',

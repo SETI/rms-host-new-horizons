@@ -105,10 +105,17 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
   `pointing='fits'`; the spacecraft's position comes from the SP kernels, or from the
   FITS header with `geom='fits'`. The camera distortion is modeled by a polynomial,
   which `fov_type='flat'` replaces with an undistorted field of view.
+- A calibrated image carries an I/F calibration, built from the conversion factor its
+  FITS header gives for a solar spectrum (RSOLAR), the exposure, and the target's
+  distance from the Sun in the SPICE kernels. A raw image, an image without a target the
+  kernels can place, and an index row have none.
 - `NewHorizonsLORRI.from_index()` makes one `Snapshot` for each row of a volume index.
   It merges in the columns of the supplemental index, whose rows must list the same
   products, matched on VOLUME_ID and FILE_SPECIFICATION_NAME in any order. Where both
-  tables give a column, the supplement's value is kept.
+  tables give a column, the supplement's value is kept. Each `Snapshot` names its FITS
+  file by its full path or URL, found from where the index itself is. A value that the
+  supplement marks as missing is left out, except a zero that is a real value, such as
+  the distance of the Sun from itself in an image of the Sun.
 
 Details are available in the
 [module documentation](https://rms-host-new-horizons.readthedocs.io/en/latest/module.html).

@@ -71,12 +71,49 @@ def test_label_dict_is_the_label(tmp_path: pathlib.Path) -> None:
     label = label_and_fits(tmp_path)
     obs = NewHorizonsLORRI.from_file(label)
     expected = Pds3Label(label, sources=False).as_dict()
-    assert obs.label_dict.keys() == expected.keys() - {'END'}
+    assert obs.label_dict.keys() == {key for key in expected
+                                     if key == key.upper()} - {'END'}
 
 
-def test_label_dict_has_no_source_keys(tmp_path: pathlib.Path) -> None:
-    obs = from_label(tmp_path)
-    assert [key for key in obs.label_dict if key.endswith('_source')] == []
+def helper_keys(dict_: dict[str, Any]) -> list[str]:
+    """The keys that the PDS3 parser adds, at any depth: those with a lower-case suffix,
+    such as "_fmt", "_unit" and "_offset", and "objects"."""
+
+    keys = []
+    for (key, value) in dict_.items():
+        if key != key.upper():
+            keys.append(key)
+        if isinstance(value, dict):
+            keys += helper_keys(value)
+    return keys
+
+
+# The label gives a unit, a time, a pointer, an object, and a NOTE that the parser unwraps
+@pytest.mark.parametrize('subfield', ['dict', 'label_dict'])
+def test_parser_helper_keys_are_left_out(tmp_path: pathlib.Path, subfield: str) -> None:
+    obs = from_label(tmp_path, extra=('NOTE = "a note"',))
+    assert helper_keys(obs.subfields[subfield]) == []
+
+
+# A caller's sources=True is overruled, so that no "_source" key appears anywhere
+def test_label_is_parsed_without_source_text(tmp_path: pathlib.Path) -> None:
+    obs = NewHorizonsLORRI.from_file(label_and_fits(tmp_path),
+                                     pds3_options={'sources': True})
+    keys = {*obs.dict, *obs.label_dict}
+    assert [key for key in keys if key.endswith('_source')] == []
+
+
+# A keyword that a header repeats is kept at each occurrence, as "NAME[n]"
+@pytest.mark.parametrize('subfield', ['header_dict', 'headers'])
+def test_header_keeps_a_repeated_keyword(tmp_path: pathlib.Path, subfield: str) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    with fits.open(path, mode='update') as hdulist:
+        hdulist[0].header.append(('REFFILE', 'a.fit'))
+        hdulist[0].header.append(('REFFILE', 'b.fit'))
+    obs = NewHorizonsLORRI.from_file(path)
+    header = obs.header_dict if subfield == 'header_dict' else obs.headers[0]
+    assert [header.get(key) for key in ('REFFILE', 'REFFILE[0]', 'REFFILE[1]')] == [
+        None, 'a.fit', 'b.fit']
 
 
 def test_label_dict_writes_times_as_the_label_does(tmp_path: pathlib.Path) -> None:
@@ -378,20 +415,22 @@ def test_null_inside_an_object_is_left_out_of_dict(tmp_path: pathlib.Path) -> No
 ##########################################################################################
 
 
-@pytest.mark.parametrize(('keyword', 'message'), [
-    ('EXPTIME', 'no EXPOSURE_DURATION for LORRI image .*lor_test.fit'),
-    ('SPCSCET', 'no START_TIME for LORRI image .*lor_test.fit'),
+# Without SPCSCET, the start would come from the clock count, SPCSCLK0
+@pytest.mark.parametrize(('missing', 'message'), [
+    (('EXPTIME',), 'no EXPOSURE_DURATION for LORRI image .*lor_test.fit'),
+    (('SPCSCET', 'SPCSCLK0'), 'no START_TIME for LORRI image .*lor_test.fit'),
 ])
-def test_fits_file_without_a_needed_item(tmp_path: pathlib.Path, keyword: str,
+def test_fits_file_without_a_needed_item(tmp_path: pathlib.Path, missing: tuple[str, ...],
                                          message: str) -> None:
-    keywords: dict[str, Any] = {keyword: None}
+    keywords: dict[str, Any] = dict.fromkeys(missing)
     path = write_fits(tmp_path / 'lor_test.fit', **keywords)
     with pytest.raises(oops.host.HostFormatError, match=message):
         NewHorizonsLORRI.from_file(path)
 
 
 @pytest.mark.parametrize(('keywords', 'lines', 'message'), [
-    ({'START_TIME': None}, 1024, 'no START_TIME for LORRI image .*lor_test.fit'),
+    ({'START_TIME': None, 'SPACECRAFT_CLOCK_START_COUNT': None}, 1024,
+     'no START_TIME for LORRI image .*lor_test.fit'),
     ({'EXPOSURE_DURATION': None}, 1024, 'no EXPOSURE_DURATION for LORRI image'),
     ({}, None, 'no lines of the image'),
     ({}, '"N/A"', 'no lines of the image'),

@@ -8,6 +8,7 @@ import pathlib
 import tempfile
 from typing import Any
 
+import cspyce
 import julian
 import numpy as np
 import oops
@@ -372,6 +373,91 @@ def test_from_file_subfields(tmp_path: pathlib.Path) -> None:
     assert obs.label_target == 'JUPITER'
     assert obs.target == 'JUPITER'
     assert obs.lightsource == 'SUN'
+    assert obs.calibrations == []
+
+##########################################################################################
+# Calibration
+##########################################################################################
+
+# The conversion of a calibrated image to radiance for a solar spectrum, as the FITS
+# header of a calibrated 4x4 image gives it, in (DN/s/pixel)/(erg/cm^2/s/A/sr)
+RSOLAR = 5114880.0
+
+# Jupiter's distance from the Sun in the jupiter_path and sun_path fixtures, in AU
+JUPITER_RANGE = 1.e9 / 149597870.7
+
+
+def test_from_file_iof_calibration(tmp_path: pathlib.Path, sun_path: oops.Path,
+                                   jupiter_path: oops.Path) -> None:
+    """I/F is pi r^2 DN / (texp RSOLAR F), where F is the solar flux at 1 AU, 176
+    erg/cm^2/s/A at the pivot wavelength of LORRI, and r the target's solar range in
+    AU."""
+
+    obs = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR})
+    (calibration,) = obs.calibrations
+    assert calibration.name == 'I/F'
+    assert calibration.factor.vals == pytest.approx(
+        np.pi * JUPITER_RANGE**2 / (TEXP * RSOLAR * 176.), rel=1.e-12)
+
+
+def test_from_file_calibration_follows_the_target(tmp_path: pathlib.Path,
+                                                  sun_path: oops.Path,
+                                                  jupiter_path: oops.Path) -> None:
+    oops.path.FixedPath((2.e9, 0., 0.), oops.Path.SSB, oops.Frame.J2000, path_id='SATURN')
+    jupiter = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR})
+    saturn = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR}, target='SATURN')
+    assert saturn.calibrations[0].factor.vals == pytest.approx(
+        4. * jupiter.calibrations[0].factor.vals)
+
+
+def test_raw_product_has_no_calibration(tmp_path: pathlib.Path, sun_path: oops.Path,
+                                        jupiter_path: oops.Path) -> None:
+    obs = load(tmp_path, fits_keywords={'RSOLAR': None})
+    assert obs.calibrations == []
+
+
+def test_label_astrometry_has_no_calibration(tmp_path: pathlib.Path, sun_path: oops.Path,
+                                             jupiter_path: oops.Path) -> None:
+    write_fits(tmp_path / 'lor_test.fit', RSOLAR=RSOLAR)
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
+    assert NewHorizonsLORRI.from_file(label, astrometry=True).calibrations == []
+
+
+def test_zero_exposure_has_no_calibration(tmp_path: pathlib.Path, sun_path: oops.Path,
+                                          jupiter_path: oops.Path) -> None:
+    obs = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR, 'EXPTIME': 0.})
+    assert obs.calibrations == []
+
+
+# The target's solar range cannot be found for no target, or for one with no path
+@pytest.mark.parametrize('target', ['---', 'CALLIRRHOE'])
+def test_target_without_a_path_has_no_calibration(tmp_path: pathlib.Path,
+                                                  sun_path: oops.Path,
+                                                  target: str) -> None:
+    obs = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR, 'SPCCBTNM': target})
+    assert obs.calibrations == []
+
+
+def test_target_without_spice_coverage_has_no_calibration(
+        tmp_path: pathlib.Path, sun_path: oops.Path, jupiter_path: oops.Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    def event_at_time(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError('SPICE(SPKINSUFFDATA) -- Insufficient ephemeris data')
+
+    monkeypatch.setattr(oops.path.FixedPath, 'event_at_time', event_at_time)
+    obs = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR})
+    assert obs.calibrations == []
+
+
+def test_calibrations_override(tmp_path: pathlib.Path, sun_path: oops.Path,
+                               jupiter_path: oops.Path) -> None:
+    calibration = oops.calibration.FlatCalib('DN', 1.)
+    obs = load(tmp_path, fits_keywords={'RSOLAR': RSOLAR}, calibrations=[calibration])
+    assert obs.calibrations == [calibration]
+
+
+def test_from_index_has_no_calibration() -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(RSOLAR=RSOLAR)])
     assert obs.calibrations == []
 
 
@@ -1047,8 +1133,74 @@ def test_from_index_row_subfields() -> None:
 def test_from_index_filepath_names_the_fits_file(spec: str, filepath: str) -> None:
     (obs,) = NewHorizonsLORRI.from_index(INDEX,
                                          row_dicts=[row(FILE_SPECIFICATION_NAME=spec)])
-    assert obs.filepath == filepath
+    assert str(obs.filepath) == (TEST_FILES / filepath).as_posix()
     assert obs.basename == filepath.rpartition('/')[2]
+
+
+def test_from_index_names_the_fits_file_in_full() -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()])
+    image = TEST_FILES / 'NHJULO_2001/data/20070110_003071/lor_0030713591_0x633_sci.fit'
+    assert (obs.image_url, obs.abspath) == (image.as_posix(), image.resolve())
+
+
+# Treated as remote, the FITS file is not in the cache, since an index read fetches none
+def test_from_index_remote_image_has_no_abspath(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(FCPath, 'is_local', lambda self: False)
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()])
+    assert 'abspath' not in obs.subfields
+
+
+@pytest.mark.parametrize(('index', 'volumes'), [
+    ('/h/volumes/NHxxLO_xxxx/NHJULO_2001/index/index.lbl', '/h/volumes/NHxxLO_xxxx'),
+    ('/h/metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl',
+     '/h/volumes/NHxxLO_xxxx'),
+    ('https://h.org/metadata/NHxxLO_xxxx/NHxxLO_1999/NHxxLO_1999_index.lbl',
+     'https://h.org/volumes/NHxxLO_xxxx'),
+    ('/h/NHJULO_2001_index.lbl', '/h'),
+], ids=['volume-index', 'metadata', 'cumulative-url', 'other'])
+def test_volumes_directory(index: str, volumes: str) -> None:
+    assert str(NewHorizonsLORRI._volumes_directory(index)) == volumes
+
+
+# The supplement is required, so None is refused rather than taken as "search for it"
+def test_from_index_refuses_no_supplement() -> None:
+    with pytest.raises(oops.host.HostIndexError,
+                       match=r'New Horizons LORRI index needs its supplemental index: '
+                             r'.*NHJULO_2001_index_edited\.lbl'):
+        NewHorizonsLORRI.from_index(INDEX, supplement=None)
+
+
+def test_from_index_rows_need_no_supplement() -> None:
+    assert len(NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()],
+                                           supplement=None)) == 1
+
+
+def test_from_index_uses_a_given_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    label = Pds3Label(INDEX)
+    labels: list[Any] = []
+    read_index_rows = NewHorizonsLORRI._read_index_rows
+
+    def spy(filepath: Any, **kwargs: Any) -> Any:
+        labels.append(kwargs.get('label'))
+        return read_index_rows(filepath, **kwargs)
+
+    monkeypatch.setattr(NewHorizonsLORRI, '_read_index_rows', spy)
+    NewHorizonsLORRI.from_index(INDEX, label=label)
+    assert labels == [label, None]      # the index's, then the supplement's
+
+
+def test_from_index_rejects_an_unknown_keyword() -> None:
+    with pytest.raises(oops.OopsTypeError,
+                       match=r"unexpected keyword argument for "
+                             r"NewHorizonsLORRI\.from_index: 'supplementary'"):
+        NewHorizonsLORRI.from_index(INDEX, supplementary=SUPPLEMENT)
+
+
+@pytest.mark.parametrize('select', [0, slice(None), 'data'])
+def test_from_index_refuses_select(select: Any) -> None:
+    with pytest.raises(oops.OopsValueError,
+                       match='each row of a New Horizons LORRI index is one observation'):
+        NewHorizonsLORRI.from_index(INDEX, select=select)
 
 
 def test_from_index_rejects_an_unknown_binning_mode() -> None:
@@ -1060,7 +1212,8 @@ def test_from_index_rejects_an_unknown_binning_mode() -> None:
 @pytest.mark.parametrize('null', ['N/A', None])
 def test_from_index_rejects_a_missing_binning_mode(null: str | None) -> None:
     with pytest.raises(oops.host.HostFormatError,
-                       match="unrecognized LORRI BINNING_MODE: missing in NHJULO_2001/"):
+                       match=r'unrecognized LORRI BINNING_MODE: missing in '
+                             r'.*NHJULO_2001/'):
         NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(BINNING_MODE=null)])
 
 
@@ -1089,13 +1242,83 @@ def test_from_index_row_null_values(null: str | None) -> None:
     assert 'TARGET_NAME' not in obs.dict
 
 
-def test_from_index_row_masked_value_is_left_out() -> None:
-    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(
-        PHASE_ANGLE=np.float64(0.), PHASE_ANGLE_mask=np.True_,
-        SOLAR_ELONGATION=np.float64(9.4), SOLAR_ELONGATION_mask=np.False_)])
-    assert 'PHASE_ANGLE' not in obs.dict
-    assert obs.dict['SOLAR_ELONGATION'] == 9.4
-    assert [key for key in obs.dict if key.endswith('_mask')] == []
+def masked(**columns: float) -> dict[str, Any]:
+    """Columns of a supplement row, each masked by the table reader, as its value equals
+    the null constant that the column declares."""
+
+    result: dict[str, Any] = {}
+    for (key, value) in columns.items():
+        result[key] = np.float64(value)
+        result[key + '_mask'] = np.True_
+    return result
+
+
+def vector(name: str, *values: float, mask: bool = True) -> dict[str, Any]:
+    """The components of a vector of a supplement row, masked where they are zero."""
+
+    result: dict[str, Any] = {}
+    suffixes = 'XYZ' if len(values) == 3 else '1234'
+    for (suffix, value) in zip(suffixes, values, strict=True):
+        key = f'{name}_{suffix}'
+        result[key] = np.float64(value)
+        result[key + '_mask'] = np.bool_(mask and value == 0.)
+    return result
+
+
+def row_dict_of(**columns: Any) -> dict[str, Any]:
+    """The `dict` of the Snapshot of a row with the given columns."""
+
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(**columns)])
+    row_dict: dict[str, Any] = obs.dict
+    return row_dict
+
+
+def test_from_index_row_mask_keys_are_left_out() -> None:
+    row_dict = row_dict_of(SOLAR_ELONGATION=np.float64(9.4),
+                           SOLAR_ELONGATION_mask=np.False_)
+    assert [key for key in row_dict if key.endswith('_mask')] == []
+
+
+def test_from_index_row_value_of_a_nonzero_null_constant_is_left_out() -> None:
+    assert 'PHASE_ANGLE' not in row_dict_of(**masked(PHASE_ANGLE=-999.))
+
+
+def test_from_index_row_zero_null_constant_of_a_scalar_is_left_out() -> None:
+    row_dict = row_dict_of(**masked(SC_GEOCENTRIC_DISTANCE=0.))
+    assert 'SC_GEOCENTRIC_DISTANCE' not in row_dict
+
+
+# A zero component of a vector that is not zero is a real value, rounded to zero
+def test_from_index_row_zero_component_of_a_vector_is_kept() -> None:
+    row_dict = row_dict_of(**vector('QUATERNIAN', 0.5, 0., 0.5, 0.7))
+    assert row_dict['QUATERNIAN_2'] == 0.
+
+
+# The supplement writes zeros for the spacecraft's velocity relative to the Earth, which
+# no label gives; the Y component declares no null constant
+def test_from_index_row_zero_vector_is_left_out() -> None:
+    columns = vector('SC_EARTH_VELOCITY_VECTOR', 0., 0., 0.)
+    columns['SC_EARTH_VELOCITY_VECTOR_Y_mask'] = np.False_
+    row_dict = row_dict_of(**columns)
+    assert [key for key in row_dict if key.startswith('SC_EARTH_VELOCITY')] == []
+
+
+# An image without target geometry has a zero vector from the spacecraft to the target
+def test_from_index_row_target_geometry_without_a_target_is_left_out() -> None:
+    row_dict = row_dict_of(**vector('SC_TARGET_POSITION_VECTOR', 0., 0., 0.),
+                           **vector('TARGET_SUN_POSITION_VECTOR', 0., 0., 0.),
+                           **masked(SOLAR_DISTANCE=0.))
+    assert [key for key in row_dict
+            if key.startswith(('SC_TARGET_', 'TARGET_SUN_', 'SOLAR_'))] == []
+
+
+# The Sun is zero kilometers from itself
+def test_from_index_row_zero_target_geometry_of_a_target_is_kept() -> None:
+    row_dict = row_dict_of(**vector('SC_TARGET_POSITION_VECTOR', 2.e8, 1.e9, 4.e8),
+                           **vector('TARGET_SUN_POSITION_VECTOR', 0., 0., 0.),
+                           **masked(SOLAR_DISTANCE=0.))
+    assert [row_dict[key] for key in ('TARGET_SUN_POSITION_VECTOR_X', 'SOLAR_DISTANCE')
+            ] == [0., 0.]
 
 
 def test_from_index_dict_is_json() -> None:
@@ -1110,21 +1333,75 @@ def test_from_index_dict_of_the_test_index_is_json() -> None:
     assert json.loads(json.dumps(obs.dict)) == obs.dict
 
 
-@pytest.mark.parametrize('column', ['START_TIME', 'EXPOSURE_DURATION'])
-def test_from_index_row_without_a_needed_column(column: str) -> None:
+@pytest.mark.parametrize(('missing', 'column'), [
+    (('START_TIME', 'SPACECRAFT_CLOCK_START_COUNT'), 'START_TIME'),
+    (('EXPOSURE_DURATION',), 'EXPOSURE_DURATION'),
+])
+def test_from_index_row_without_a_needed_column(missing: tuple[str, ...],
+                                                column: str) -> None:
     row_dict = row()
-    del row_dict[column]
+    for key in missing:
+        del row_dict[key]
     with pytest.raises(oops.host.HostFormatError,
-                       match=f'no {column} for LORRI image NHJULO_2001/data/'):
+                       match=f'no {column} for LORRI image .*NHJULO_2001/data/'):
         NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
 
 
+def fake_scs2e(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
+    """Replace cspyce.scs2e with a fake that gives 1000 seconds plus the count's seconds;
+    return the list of its calls."""
+
+    calls: list[tuple[int, str]] = []
+
+    def scs2e(sc: int, count: str) -> float:
+        calls.append((sc, count))
+        return 1000. + float(count.partition(':')[0])
+
+    monkeypatch.setattr(cspyce, 'scs2e', scs2e)
+    return calls
+
+
+# Without START_TIME, the start comes from the clock count through the clock kernel
+def test_from_index_row_time_from_the_clock_count(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = fake_scs2e(monkeypatch)
+    row_dict = row()
+    del row_dict['START_TIME']
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+    assert calls == [(-98, '0030713585:49000')]
+    assert obs.time == (1000. + 30713585., 1000. + 30713590.)
+
+
+def test_from_file_time_from_the_clock_count(tmp_path: pathlib.Path,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_scs2e(monkeypatch)
+    obs = load(tmp_path, fits_keywords={'SPCSCET': None})
+    assert obs.time[0] == 1000. + 30713585.
+
+
+def test_time_from_an_unreadable_clock_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    def scs2e(sc: int, count: str) -> float:
+        raise ValueError('SPICE(INVALIDSCLKSTRING) -- Invalid SCLK string')
+
+    monkeypatch.setattr(cspyce, 'scs2e', scs2e)
+    row_dict = row()
+    del row_dict['START_TIME']
+    with pytest.raises(oops.OopsSpiceError,
+                       match=r'no time for the LORRI clock count 0030713585:49000 for '
+                             r'.*lor_0030713591_0x633_sci\.fit: '
+                             r'SPICE\(INVALIDSCLKSTRING\)'):
+        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+
+
+# Without a clock count, which would give the start time instead
 @pytest.mark.parametrize(('column', 'value'), [
     ('START_TIME', '2007-01-10T25:41:08'),
     ('EXPOSURE_DURATION', 'five seconds'),
 ])
 def test_from_index_row_with_an_invalid_value(column: str, value: str) -> None:
+    row_dict = row(**{column: value})
+    del row_dict['SPACECRAFT_CLOCK_START_COUNT']
     with pytest.raises(oops.host.HostFormatError, match=f'no {column} for LORRI image'):
-        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(**{column: value})])
+        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
 
 ##########################################################################################

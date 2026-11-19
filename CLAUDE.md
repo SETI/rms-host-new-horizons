@@ -90,15 +90,31 @@ described below.
   value is absent, as are `error` and `quality` on a raw product. `dict` is the merged
   items plus every other key of each source; `label_dict`, `header_dict` and `headers`
   are the raw sources. All four, and `dict` of `from_index()`, must stay
-  JSON-serializable (`_label_as_json()`, `_header_as_json()`, `_row_as_json()`).
+  JSON-serializable (`_label_as_json()`, `_header_as_json()`, `_row_as_json()`). Labels
+  are always parsed with `sources=False`; `label_dict` leaves out END, None values, and
+  the parser's helper keys (lower-case suffixes such as `_fmt`, `_unit`, `_offset`, and
+  `objects`); a repeated FITS keyword is keyed `NAME[n]` (`_header_cards()`), as the
+  VICAR hosts key a repeated parameter. If no source gives the start time, it comes from
+  SPACECRAFT_CLOCK_START_COUNT through the clock kernel (`_add_start_time_from_clock()`).
+- `calibrations` holds one `FlatCalib('I/F', ...)` when the FITS header gives RSOLAR (a
+  calibrated product): pi r^2 / (texp RSOLAR 176), r the target's solar range in AU from
+  the SP kernels (`_iof_calibrations()`). It is empty for a raw product, a label-only
+  read, a zero exposure, a target with no path or no ephemeris, and every index row.
 - With the pointing from the C kernels, `from_file()` evaluates the camera frame at
   mid-exposure (`_check_pointing()`) and raises `oops.OopsSpiceError` with the SPICE error
   code if the kernels give none; it catches only the classes cspyce raises. It does not
   check when `frame` is given or `pointing` is not "spice", and `from_index()` never
   checks, so that one image without pointing does not stop the whole index.
-- `from_index()` reads the team's volume index with its supplement: the one named by
-  `supplement`, or else the one beside the index, which must then exist. Given
-  `row_dicts`, it reads neither. `_read_index_and_supplement()` matches rows on `VOLUME_ID` and
+- `from_index()` follows the shared contract: `supplement` defaults to
+  `oops.Host.SUPPLEMENT` (the one beside the index, which must then exist), and None
+  raises `HostIndexError` unless `row_dicts` is given; `label=` is passed to
+  `_read_index_rows()`; `select` other than None raises `OopsValueError`; any other
+  keyword raises `OopsTypeError`. Each row's path subfields name the FITS file in full,
+  from `_volumes_directory()` of the index's location, with `abspath` only when the file
+  is local or cached. `_row_as_json()` does not apply the table reader's masks as they
+  are, because the supplements declare zero as the null constant of vectors where a zero
+  can be real (see the comment at `_TARGET_GEOMETRY`). Given
+  `row_dicts`, it reads neither table. `_read_index_and_supplement()` matches rows on `VOLUME_ID` and
   `FILE_SPECIFICATION_NAME` in any order (the NHJULO_1001 index lists
   `lor_0035089864_0x632_eng` last instead of at row 678, where the sorted supplement has
   it), and the supplement, which follows the labels, wins every shared column (the index

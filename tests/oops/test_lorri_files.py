@@ -192,7 +192,8 @@ def index_row() -> Any:
 
 
 def test_index_row_names_the_fits_file() -> None:
-    assert index_row().filepath == f'NHJULO_2001/data/20070110_003071/{STEM}_sci.fit'
+    expected = TEST_FILES / f'NHJULO_2001/data/20070110_003071/{STEM}_sci.fit'
+    assert str(index_row().filepath) == expected.as_posix()
 
 
 @pytest.mark.parametrize('attribute', ['binning_mode', 'spacecraft_clock_start_count',
