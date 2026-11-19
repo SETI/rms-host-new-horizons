@@ -131,7 +131,7 @@ class _NewHorizons:
         return (spicedb.as_dict(kernel_info), spicedb.as_names(kernel_info)[0])
 
     @staticmethod
-    def used_kernels(time, inst, *, target=None, ck=True):
+    def used_kernels(time, inst, *, target=None, ck=True, return_all_planets=False):
         """The kernels associated with a New Horizons observation.
 
         Parameters:
@@ -145,6 +145,9 @@ class _NewHorizons:
                 exclude them, e.g. for an observation whose pointing came from a custom
                 frame rather than SPICE, where any furnished CK is unrelated to how the
                 observation was actually pointed.
+            return_all_planets (bool, optional): True to include the kernels of every
+                planet and of Pluto, each with its system barycenter, besides those of
+                the target.
 
         Returns:
             list[str]: The basenames of the furnished kernels that apply to the
@@ -154,6 +157,9 @@ class _NewHorizons:
         # A planet or a moon, with an ID from 100 to 999, orbits its system barycenter,
         # whose ID is its own divided by 100; any other body stands alone
         bodies = []
+        if return_all_planets:
+            for barycenter in range(1, 10):
+                bodies += [barycenter, barycenter * 100 + 99]
         if target is not None:
             try:
                 body = cspyce.bodn2c(target)
@@ -171,7 +177,8 @@ class _NewHorizons:
         # spicedb compares times in seconds TAI
         time_tai = tuple(julian.tai_from_tdb(t) for t in time)
         return spicedb.used_basenames(types=types, time=time_tai, inst=inst,
-                                      sc=_NewHorizons.SPACECRAFT_ID, bodies=bodies)
+                                      sc=_NewHorizons.SPACECRAFT_ID,
+                                      bodies=list(dict.fromkeys(bodies)))
 
     @staticmethod
     def _format_asof(asof):

@@ -30,8 +30,9 @@ described below.
   (`-W -n`), codespell and PyMarkdown. `ruff format` is disabled.
   `.github/workflows/run-tests.yml` runs the same set. `scripts/setup-venv.sh` builds the
   `venv/` that the scripts expect; set `VENV` to use another.
-- The `oops.Host` API first appears in rms-oops 0.4.0, the minimum version in
-  `pyproject.toml`.
+- The minimum rms-oops in `pyproject.toml` is 0.5.0, the first release with
+  `oops.OopsSpiceError` (the `oops.Host` API first appears in 0.4.0). Until 0.5.0 is on
+  PyPI, install rms-oops from its branch into the venv by hand.
 - The type information is published in two stubs: `host_new_horizons/__init__.pyi`
   declares `NewHorizonsLORRI` in full, and `host_new_horizons/oops/__init__.pyi`
   re-exports it. `stubtest` checks them against the runtime in the check script and in CI,
@@ -70,7 +71,7 @@ described below.
   hosts: a FITS input reads the FITS file alone; a label input reads the label and the
   FITS file its `^IMAGE` names (`_fits_path()`, which tries the case of the label's own
   name first), except that an astrometry read of a label reads the label alone and needs
-  no FITS file (and refuses `geom` or `pointing` from the header with `HostError`). The
+  no FITS file (and refuses `geom` or `pointing` from the header with `OopsValueError`). The
   path subfields always name the FITS file. The host opens FITS files itself
   (`_open_fits()`), because `oops.Host._read_fileinfo()` leaves a FITS file of another
   host open, and closes every HDUList once the arrays and headers are copied out of it,
@@ -79,24 +80,30 @@ described below.
 - The metadata come from every source read. `_items_from_pds3()` and
   `_items_from_header()` give each source's items under PDS3 names (START_TIME in seconds
   TDB, the FITS start being SPCSCET - EXPTIME/2; STOPMET converted by `_sclk_from_met()`),
-  leaving out missing and null values (`_NULL_VALUES`), and `_merge_items()` merges them.
-  Where both give an item and the values differ, `_RESOLUTION_RULES` chooses; each rule's
-  comment cites the survey evidence and the issue that records the difference. Every
-  computed value (times, FOV, target) comes from the merged items. Nothing missing is
-  None: a subfield or `dict` key with no value is absent, as are `error` and `quality` on
-  a raw product. `dict` is the merged items plus every other key of each source;
-  `label_dict` and `header_dict` are the raw sources.
+  leaving out missing and null values (`_is_missing()`, `_NULL_VALUES`), and
+  `_merge_items()` merges them. Where both give an item, `_WINNING_SOURCE` names the one
+  source, "label" or "header", whose value it takes for every image; each entry's comment
+  cites the evidence and the issue that records the difference. Never add a rule that
+  looks at the values of one image. The target body comes from the merged TARGET_NAME by
+  the fixed translation in `_target_body()`. Every computed value (times, FOV, target)
+  comes from the merged items. Nothing missing is None: a subfield or `dict` key with no
+  value is absent, as are `error` and `quality` on a raw product. `dict` is the merged
+  items plus every other key of each source; `label_dict`, `header_dict` and `headers`
+  are the raw sources. All four, and `dict` of `from_index()`, must stay
+  JSON-serializable (`_label_as_json()`, `_header_as_json()`, `_row_as_json()`).
 - With the pointing from the C kernels, `from_file()` evaluates the camera frame at
-  mid-exposure (`_check_pointing()`) and raises `HostError` with the SPICE error code if
-  the kernels give none. `from_index()` does not, so that one image without pointing does
-  not stop the whole index.
+  mid-exposure (`_check_pointing()`) and raises `oops.OopsSpiceError` with the SPICE error
+  code if the kernels give none; it catches only the classes cspyce raises. It does not
+  check when `frame` is given or `pointing` is not "spice", and `from_index()` never
+  checks, so that one image without pointing does not stop the whole index.
 - `from_index()` reads the team's volume index with its supplement: the one named by
   `supplement`, or else the one beside the index, which must then exist. Given
   `row_dicts`, it reads neither. `_read_index_and_supplement()` matches rows on `VOLUME_ID` and
-  `FILE_SPECIFICATION_NAME` in any order (the NHJULO_1001 supplement lists two rows out of
-  the index's order), and the supplement, which follows the labels, wins every shared
-  column (the index gives clock counts with a partition and rounds the stop count
-  differently). `oops.Host.from_index()` reads the rows itself with the default
+  `FILE_SPECIFICATION_NAME` in any order (the NHJULO_1001 index lists
+  `lor_0035089864_0x632_eng` last instead of at row 678, where the sorted supplement has
+  it), and the supplement, which follows the labels, wins every shared column (the index
+  gives clock counts with a partition, rounds the stop count differently, gives
+  PRODUCT_CREATION_TIME as a date alone, and shortens some TARGET_NAMEs). `oops.Host.from_index()` reads the rows itself with the default
   validation, which compares every shared column, so it fails on these indexes.
 - The camera frame `NH_LORRI` is a `Cmatrix` that flips the y and z axes of the SPICE
   frame, registered as `NH_LORRI_FLIPPED`, because the instrument kernel gives the

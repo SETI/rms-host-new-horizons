@@ -12,9 +12,9 @@ dependencies = [
   "astropy>=6.1",           # 6.1 is the first that supports NumPy 2
   "cspyce>=2.3.2",          # 2.3.2 is the first with Python 3.13 wheels
   "numpy>=2.0",
-  "rms-filecache>=3.0.0",
+  "rms-filecache>=2.2.0",   # 2.2.0 is the first whose FCPath.absolute() works
   "rms-julian>=3.0.2",      # 3.0.2 drops pyparsing's deprecated camelCase API
-  "rms-oops>=0.4.0",        # 0.4.0 adds the oops.Host API; also provides spicedb
+  "rms-oops>=0.5.0",        # 0.5.0 adds oops.OopsSpiceError; also provides spicedb
   "rms-pdsparser>=2.3.0",
 ]
 license = "Apache-2.0"

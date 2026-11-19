@@ -61,8 +61,7 @@ def label_value(product: str, keyword: str) -> str:
 @pytest.mark.parametrize('product', PRODUCTS)
 @pytest.mark.parametrize('source', INPUTS)
 @pytest.mark.parametrize('attribute', ['time', 'texp', 'target', 'lightsource',
-                                       'binning_mode', 'label_target',
-                                       'spacecraft_clock_start_count',
+                                       'binning_mode', 'spacecraft_clock_start_count',
                                        'spacecraft_clock_stop_count', 'filepath',
                                        'basename', 'abspath', 'image_url',
                                        'header_dict', 'spice_kernels', 'spice_frame_name',
@@ -140,7 +139,20 @@ def test_raw_product_has_no_error_or_quality() -> None:
 def test_dict_matches_the_fits_file(product: str, source: str) -> None:
     from_fits = load(product, 'fit').dict
     dict_ = load(product, source).dict
+    del from_fits['TARGET_NAME']
     assert {key: dict_[key] for key in from_fits} == from_fits
+
+
+# The two labels name the target differently ("J17 CALLIRRHOE" and "CALLIRRHOE"); the
+# detached label's name wins, and both give the same target body
+@pytest.mark.parametrize('product', PRODUCTS)
+@pytest.mark.parametrize(('source', 'name'), [
+    ('fit', 'CALLIRRHOE'), ('host_fit', 'CALLIRRHOE'),
+    ('lbl', 'J17 CALLIRRHOE'), ('host_lbl', 'J17 CALLIRRHOE')])
+def test_target_name_of_each_input(product: str, source: str, name: str) -> None:
+    obs = load(product, source)
+    assert obs.label_target == name
+    assert obs.dict['TARGET_NAME'] == name
 
 
 @pytest.mark.parametrize('product', PRODUCTS)
@@ -157,7 +169,7 @@ def test_calibrated_product_error_and_quality() -> None:
         assert np.array_equal(obs.quality, hdulist[2].data)
 
 
-# The label's catalog name "J17 CALLIRRHOE" is not a SPICE body name; the header's is
+# The label's catalog name "J17 CALLIRRHOE" translates to the body name the header gives
 @pytest.mark.parametrize('source', ['fit', 'lbl'])
 def test_target(source: str) -> None:
     obs = load('sci', source)
@@ -236,6 +248,6 @@ def test_label_astrometry_time_matches_the_fits_file(label_alone: pathlib.Path) 
 
 def test_label_astrometry_target_is_the_label_target(label_alone: pathlib.Path) -> None:
     obs = NewHorizonsLORRI.from_file(label_alone, astrometry=True)
-    assert obs.target == 'J17 CALLIRRHOE'
+    assert obs.target == 'CALLIRRHOE'
 
 ##########################################################################################

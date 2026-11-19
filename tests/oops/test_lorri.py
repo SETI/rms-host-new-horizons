@@ -3,6 +3,7 @@
 ##########################################################################################
 """Tests for the New Horizons LORRI host, host_new_horizons.oops.lorri."""
 
+import json
 import pathlib
 import tempfile
 from typing import Any
@@ -385,7 +386,53 @@ def test_from_file_target(tmp_path: pathlib.Path, label_target: str, target: str
     assert obs.label_target == label_target
 
 
-@pytest.mark.parametrize('null', ['---', 'N/A', 'UNK', 'NULL'])
+# The target body of each form of name that the labels give
+@pytest.mark.parametrize(('name', 'body'), [
+    ('J1 IO', 'IO'),
+    ('J17 CALLIRRHOE', 'CALLIRRHOE'),
+    ('J RINGS', 'J RINGS'),
+    ('ASTEROID 486958 (2014 MU69)', 'ARROKOTH'),
+    ('MU69', 'ARROKOTH'),
+    ('ASTEROID 516977 (2012 HZ84)', 'ASTEROID 516977 (2012 HZ84)'),
+    ('136472 MAKEMAKE', 'MAKEMAKE'),
+    ('50000 QUAOAR (2002 LM60)', 'QUAOAR'),
+    ('15810 ARAWN (1994 JR1)', 'ARAWN'),
+    ('2060 CHIRON', 'CHIRON'),
+    ('2011 HJ103', '2011 HJ103'),
+    ('2020 KR11', '2020 KR11'),
+    ('2014 MU', '2014 MU'),
+    ('NGC 3532', 'NGC 3532'),
+    ('WOLF 359', 'WOLF 359'),
+    ('RADEC=270.66,-14.63=P4', 'RADEC=270.66,-14.63=P4'),
+    ('PLUTO', 'PLUTO'),
+    ('PLUTO-CHARON', 'PLUTO'),
+    ('CALIBRATION', 'NONE'),
+    (None, 'NONE'),
+])
+def test_target_body(name: str | None, body: str) -> None:
+    assert NewHorizonsLORRI._target_body(name) == body
+
+
+def test_from_file_target_comes_from_the_label_name(tmp_path: pathlib.Path) -> None:
+    write_fits(tmp_path / 'lor_test.fit', SPCCBTNM='MU69')
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT',
+                        TARGET_NAME='"ASTEROID 486958 (2014 MU69)"')
+    obs = NewHorizonsLORRI.from_file(label)
+    assert obs.target == 'ARROKOTH'
+    assert obs.label_target == 'ASTEROID 486958 (2014 MU69)'
+
+
+def test_from_file_spice_kernels_of_the_target_body(tmp_path: pathlib.Path,
+                                                    fake_spicedb: FakeSpiceDB) -> None:
+    write_fits(tmp_path / 'lor_test.fit', SPCCBTNM='CALLIRRHOE')
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT',
+                        TARGET_NAME='"J17 CALLIRRHOE"')
+    _ = NewHorizonsLORRI.from_file(label)
+    (_, kwargs) = fake_spicedb.named('used_basenames')[0]
+    assert kwargs['bodies'] == [5, 517]
+
+
+@pytest.mark.parametrize('null', ['---', 'N/A', 'UNK', 'NULL', 'UNKNOWN', ''])
 def test_from_file_null_target(tmp_path: pathlib.Path, null: str) -> None:
     obs = load(tmp_path, fits_keywords={'SPCCBTNM': null})
     assert obs.target == 'NONE'
@@ -415,6 +462,9 @@ def test_from_file_missing_clock_count(tmp_path: pathlib.Path, keyword: str,
     (30598438.977, '0030598438:48850'),
     (408709280.99999999, '0408709281:00000'),
     (0., '0000000000:00000'),
+    # 299193745.002 * 50000 is 14959687250099.998 in floating point: rounded, not
+    # truncated
+    (299193745.002, '0299193745:00100'),
 ])
 def test_sclk_from_met(met: float, count: str) -> None:
     assert NewHorizonsLORRI._sclk_from_met(met) == count
@@ -444,6 +494,24 @@ def test_from_file_spice_kernels_query(tmp_path: pathlib.Path,
     (_, kwargs) = fake_spicedb.named('used_basenames')[0]
     assert kwargs['types'] is None
     assert kwargs['bodies'] == [5, 599]
+
+
+# The planets, Pluto included, each with its system barycenter
+ALL_PLANETS = [1, 199, 2, 299, 3, 399, 4, 499, 5, 599, 6, 699, 7, 799, 8, 899, 9, 999]
+
+
+def test_from_file_return_all_planets(tmp_path: pathlib.Path,
+                                      fake_spicedb: FakeSpiceDB) -> None:
+    _ = load(tmp_path, fits_keywords={'SPCCBTNM': 'CALLIRRHOE'}, return_all_planets=True)
+    (_, kwargs) = fake_spicedb.named('used_basenames')[0]
+    assert kwargs['bodies'] == ALL_PLANETS + [517]
+
+
+def test_from_index_return_all_planets(fake_spicedb: FakeSpiceDB) -> None:
+    _ = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(TARGET_NAME='JUPITER')],
+                                    return_all_planets=True)
+    (_, kwargs) = fake_spicedb.named('used_basenames')[0]
+    assert kwargs['bodies'] == ALL_PLANETS
 
 
 def test_from_file_default_geometry(tmp_path: pathlib.Path) -> None:
@@ -681,7 +749,8 @@ def test_from_file_label_with_a_missing_fits_file(tmp_path: pathlib.Path) -> Non
 
 def test_from_file_label_without_an_image(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', None)
-    with pytest.raises(oops.host.HostFormatError, match='PDS3 label names no FITS file'):
+    with pytest.raises(oops.host.PdsHostError,
+                       match=r'PDS3 label names no FITS file: .*lor_test\.lbl'):
         NewHorizonsLORRI.from_file(label)
 
 
@@ -742,7 +811,7 @@ def test_from_file_label_astrometry_rejects_fits_geometry(
         tmp_path: pathlib.Path, option: str, value: str) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
     options: dict[str, Any] = {option: value}
-    with pytest.raises(oops.host.HostError, match='need the FITS file'):
+    with pytest.raises(oops.OopsValueError, match='need the FITS file'):
         NewHorizonsLORRI.from_file(label, astrometry=True, **options)
 
 ##########################################################################################
@@ -949,7 +1018,7 @@ def test_from_index_row_snapshot() -> None:
     tstart = julian.tdb_from_tai(julian.tai_from_iso('2007-01-10T05:41:08.363'))
     assert obs.time == pytest.approx((tstart, tstart + 5.))
     assert obs.fov is NewHorizonsLORRI._FOVS['4X4', 'fast']
-    assert obs.target == 'J17 CALLIRRHOE'
+    assert obs.target == 'CALLIRRHOE'
     assert obs.frame.frame_id == 'NH_LORRI'
     assert obs.path.path_id == 'NEW HORIZONS'
 
@@ -990,13 +1059,35 @@ def test_from_index_custom_frame_reports_no_cks(fake_spice: FakeSpice,
     assert 'CK' not in fake_spicedb.named('used_basenames')[0][1]['types']
 
 
-@pytest.mark.parametrize('null', ['N/A', 'UNK'])
-def test_from_index_row_null_values(null: str) -> None:
+@pytest.mark.parametrize('null', ['N/A', 'UNK', None])
+def test_from_index_row_null_values(null: str | None) -> None:
     (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(
         TARGET_NAME=null, SPACECRAFT_CLOCK_START_COUNT=null)])
     assert obs.target == 'NONE'
     assert 'label_target' not in obs.subfields
     assert 'spacecraft_clock_start_count' not in obs.subfields
+    assert 'TARGET_NAME' not in obs.dict
+
+
+def test_from_index_row_masked_value_is_left_out() -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(
+        PHASE_ANGLE=np.float64(0.), PHASE_ANGLE_mask=np.True_,
+        SOLAR_ELONGATION=np.float64(9.4), SOLAR_ELONGATION_mask=np.False_)])
+    assert 'PHASE_ANGLE' not in obs.dict
+    assert obs.dict['SOLAR_ELONGATION'] == 9.4
+    assert [key for key in obs.dict if key.endswith('_mask')] == []
+
+
+def test_from_index_dict_is_json() -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(
+        APPROX_TARGET_LINE=np.int64(527), SEQUENCE_ID=np.str_('JELR_JOBSATM01'),
+        SOLAR_ELONGATION_mask=np.False_)])
+    assert json.loads(json.dumps(obs.dict)) == obs.dict
+
+
+def test_from_index_dict_of_the_test_index_is_json() -> None:
+    obs = NewHorizonsLORRI.from_index(INDEX)[0]
+    assert json.loads(json.dumps(obs.dict)) == obs.dict
 
 
 @pytest.mark.parametrize('column', ['START_TIME', 'EXPOSURE_DURATION'])

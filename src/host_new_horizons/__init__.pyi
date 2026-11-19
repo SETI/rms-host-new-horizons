@@ -36,14 +36,17 @@ class NewHorizonsLORRI(Host):
     # The runtime names the first parameter `fileinfo`, where Host names it `filepath`.
     # A missing or unreadable file raises OSError (FileNotFoundError for a FITS file that
     # a label names but that does not exist). A file whose content cannot be parsed or
-    # used raises oops.host.HostFormatError, or its subclass PdsHostError for a label.
-    # geom or pointing other than "spice" in an astrometry read of a PDS3 label, and an
-    # image with no C-kernel pointing, raise oops.host.HostError, whose message for
-    # missing pointing includes the SPICE error code, such as "SPICE(NOFRAMECONNECT)".
+    # used raises oops.host.HostFormatError, or its subclass PdsHostError for a label
+    # (also for a label that names no FITS file). geom or pointing other than "spice" in
+    # an astrometry read of a PDS3 label raises oops.OopsValueError. An image with no
+    # C-kernel pointing raises oops.OopsSpiceError, whose message ends with the SPICE
+    # error code, such as "SPICE(NOFRAMECONNECT)"; never when `frame` is given or
+    # `pointing` is not "spice". from_index never checks the pointing.
     @staticmethod
     def from_file(  # type: ignore[override]
         fileinfo: str | pathlib.Path | FCPath | Pds3Label | HDUList, *,
         geom: str = 'spice', pointing: str = 'spice', fov_type: str = 'fast',
+        return_all_planets: bool = False,
         pds3_options: dict[str, Any] | None = None, astrometry: bool = False,
         target: str | Body | None = None, lightsource: LightSource | None = None,
         path: str | Path | None = None, frame: str | Frame | None = None,
@@ -61,6 +64,7 @@ class NewHorizonsLORRI(Host):
         row_dicts: list[dict[str, Any]] | None = None,
         pds3_options: dict[str, Any] | None = None,
         filter: dict[str, Any] | None = None, fov_type: str = 'fast',
+        return_all_planets: bool = False,
         select: int | slice | str | tuple[int | slice | str, ...] | None = None,
         target: str | Body | None = None, lightsource: LightSource | None = None,
         path: str | Path | None = None, frame: str | Frame | None = None,

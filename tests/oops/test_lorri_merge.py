@@ -4,6 +4,7 @@
 """Tests of what NewHorizonsLORRI.from_file() reads from each input, and of how it merges
 the detached PDS3 label with the FITS header."""
 
+import json
 import pathlib
 from typing import Any
 
@@ -15,7 +16,8 @@ from conftest import FITS_HEADER, write_fits, write_label
 from filecache import FCPath
 from pdsparser import Pds3Label
 
-from host_new_horizons.oops.lorri import NewHorizonsLORRI
+from host_new_horizons.oops.lorri import (_FITS_ITEM_KEYWORDS, _WINNING_SOURCE,
+                                          NewHorizonsLORRI)
 
 # The start of the exposure in the synthetic FITS header, and in the label, which gives
 # it rounded to the millisecond
@@ -65,13 +67,71 @@ def test_subfields_of_each_read(tmp_path: pathlib.Path, suffix: str, astrometry:
 def test_label_dict_is_the_label(tmp_path: pathlib.Path) -> None:
     label = label_and_fits(tmp_path)
     obs = NewHorizonsLORRI.from_file(label)
-    assert obs.label_dict == Pds3Label(label, sources=True).as_dict()
+    expected = Pds3Label(label, sources=False).as_dict()
+    assert obs.label_dict.keys() == expected.keys() - {'END'}
+
+
+def test_label_dict_has_no_source_keys(tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path)
+    assert [key for key in obs.label_dict if key.endswith('_source')] == []
+
+
+def test_label_dict_writes_times_as_the_label_does(tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path, PRODUCT_CREATION_TIME='2016-10-31T00:00:00')
+    assert obs.label_dict['PRODUCT_CREATION_TIME'] == '2016-10-31T00:00:00'
+
+
+def test_label_dict_writes_a_set_as_a_list(tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path, extra=('SPICE_FILE_NAME = {"b.bc", "a.bsp"}',))
+    assert obs.label_dict['SPICE_FILE_NAME'] == ['b.bc', 'a.bsp']
+
+
+@pytest.mark.parametrize(('suffix', 'astrometry'), [
+    ('fit', False), ('fit', True), ('lbl', False), ('lbl', True)])
+@pytest.mark.parametrize('subfield', ['dict', 'label_dict', 'header_dict', 'headers'])
+def test_metadata_subfields_are_json(tmp_path: pathlib.Path, suffix: str,
+                                     astrometry: bool, subfield: str) -> None:
+    write_fits(tmp_path / 'lor_test.fit', COMMENT='a comment')
+    write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT',
+                PRODUCT_CREATION_TIME='2016-10-31T00:00:00',
+                extra=('SPICE_FILE_NAME = {"b.bc", "a.bsp"}',))
+    obs = NewHorizonsLORRI.from_file(tmp_path / f'lor_test.{suffix}',
+                                     astrometry=astrometry)
+    value = obs.subfields.get(subfield, {})
+    assert json.loads(json.dumps(value)) == value
+
+
+@pytest.mark.parametrize('subfield', ['dict', 'label_dict'])
+def test_end_of_the_label_is_left_out(tmp_path: pathlib.Path, subfield: str) -> None:
+    assert 'END' not in from_label(tmp_path).subfields[subfield]
+
+
+def test_headers_keep_the_commentary_cards(tmp_path: pathlib.Path) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    with fits.open(path, mode='update') as hdulist:
+        hdulist[0].header['COMMENT'] = 'one'
+        hdulist[0].header['COMMENT'] = 'two'
+    obs = NewHorizonsLORRI.from_file(path)
+    assert obs.headers[0]['COMMENT'] == ['one', 'two']
+
+
+def test_undefined_header_card_is_left_out(tmp_path: pathlib.Path) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    with fits.open(path, mode='update') as hdulist:
+        hdulist[0].header['UNDEF'] = None
+    obs = NewHorizonsLORRI.from_file(path)
+    assert 'UNDEF' not in obs.header_dict
 
 
 def test_dict_of_a_label_holds_both_sources(tmp_path: pathlib.Path) -> None:
     obs = from_label(tmp_path)
     assert obs.dict['INSTRUMENT_ID'] == 'LORRI'
     assert obs.dict['MISSION'] == 'New Horizons'
+
+
+def test_label_key_wins_over_the_same_header_key_in_dict(tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path, MISSION='"LABEL MISSION"')
+    assert obs.dict['MISSION'] == 'LABEL MISSION'
 
 
 def test_dict_of_a_label_matches_the_fits_file_where_they_agree(
@@ -102,6 +162,13 @@ def test_parsed_label_of_another_instrument(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_file(label)
 
 
+def test_parsed_label_without_a_file(tmp_path: pathlib.Path) -> None:
+    text = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT').read_text()
+    label = Pds3Label(text)
+    with pytest.raises(oops.host.HostFormatError, match='Pds3Label without a file path'):
+        NewHorizonsLORRI.from_file(label, astrometry=True)
+
+
 def test_hdulist_without_a_file(tmp_path: pathlib.Path) -> None:
     with fits.open(write_fits(tmp_path / 'lor_test.fit')) as hdulist:
         in_memory = fits.HDUList([hdu.copy() for hdu in hdulist])
@@ -128,40 +195,46 @@ def test_parsed_object_of_another_kind() -> None:
 ##########################################################################################
 
 
-@pytest.mark.parametrize(('fits_start', 'expected'), [
-    (LABEL_START + 0.0004, LABEL_START + 0.0004),     # the label rounds it: the header's
-    (LABEL_START - 0.0004, LABEL_START - 0.0004),
-    (LABEL_START + 0.002, LABEL_START),                # they differ: the label's
-])
-def test_start_time_rule(tmp_path: pathlib.Path, fits_start: float,
-                         expected: float) -> None:
+def test_every_item_has_one_winning_source() -> None:
+    assert set(_WINNING_SOURCE) == set(_FITS_ITEM_KEYWORDS)
+    assert set(_WINNING_SOURCE.values()) <= {'label', 'header'}
+
+
+# The header's start wins whether or not the label's is the same time rounded
+@pytest.mark.parametrize('fits_start', [LABEL_START + 0.0004, LABEL_START - 0.0004,
+                                        LABEL_START + 0.002, LABEL_START - 1.])
+def test_start_time_rule(tmp_path: pathlib.Path, fits_start: float) -> None:
     spcscet = fits_start + FITS_HEADER['EXPTIME'] / 2.
     obs = from_label(tmp_path, fits_keywords={'SPCSCET': spcscet})
-    assert obs.time[0] == pytest.approx(expected, abs=1.e-7)
+    assert obs.time[0] == fits_start
 
 
-@pytest.mark.parametrize(('exptime', 'expected'), [
-    (4.9996, 4.9996),       # the label rounds it: the header's
-    (4.9, 5.0),             # they differ: the label's
-])
-def test_exposure_duration_rule(tmp_path: pathlib.Path, exptime: float,
-                                expected: float) -> None:
+def test_dict_start_time_follows_the_header(tmp_path: pathlib.Path) -> None:
+    spcscet = LABEL_START + 0.002 + FITS_HEADER['EXPTIME'] / 2.
+    obs = from_label(tmp_path, fits_keywords={'SPCSCET': spcscet})
+    assert obs.dict['START_TIME'] == '2007-01-10T05:41:08.365'
+
+
+@pytest.mark.parametrize('exptime', [4.9996, 4.9, 6.0])
+def test_exposure_duration_rule(tmp_path: pathlib.Path, exptime: float) -> None:
     obs = from_label(tmp_path, fits_keywords={'EXPTIME': exptime})
-    assert obs.texp == expected
+    assert obs.texp == exptime
 
 
-@pytest.mark.parametrize(('label_target', 'fits_target', 'expected'), [
-    ('J17 CALLIRRHOE', 'CALLIRRHOE', 'CALLIRRHOE'),    # only the header's is a body
-    ('JUPITER', 'FJUPITER', 'JUPITER'),                # only the label's is a body
-    ('J RINGS', 'ANSA', 'J RINGS'),                    # neither: the label's
-    ('PLUTO', 'JUPITER', 'PLUTO'),                     # both: the label's
+@pytest.mark.parametrize(('label_target', 'fits_target', 'target'), [
+    ('J17 CALLIRRHOE', 'CALLIRRHOE', 'CALLIRRHOE'),
+    ('JUPITER', 'FJUPITER', 'JUPITER'),
+    ('J RINGS', 'ANSA', 'J RINGS'),
+    ('KERBEROS', 'RADEC=270.66,-14.63=P4', 'KERBEROS'),
+    ('PLUTO', 'JUPITER', 'PLUTO'),
 ])
 def test_target_name_rule(tmp_path: pathlib.Path, label_target: str, fits_target: str,
-                          expected: str) -> None:
+                          target: str) -> None:
     obs = from_label(tmp_path, TARGET_NAME=f'"{label_target}"',
                      fits_keywords={'SPCCBTNM': fits_target})
-    assert obs.label_target == expected
-    assert obs.dict['TARGET_NAME'] == expected
+    assert obs.label_target == label_target
+    assert obs.dict['TARGET_NAME'] == label_target
+    assert obs.target == target
 
 
 @pytest.mark.parametrize(('keyword', 'value', 'subfield'), [
@@ -237,12 +310,17 @@ def test_undefined_header_card_counts_as_missing(tmp_path: pathlib.Path) -> None
     assert obs.time[0] == pytest.approx(LABEL_START, abs=1.e-6)
 
 
+@pytest.mark.parametrize('dt', [0., 1.])
 def test_fits_geometry_uses_the_header_epoch(tmp_path: pathlib.Path,
-                                             sun_path: oops.Path) -> None:
-    obs = from_label(tmp_path, START_TIME='2007-01-10T05:41:10.363', geom='fits')
-    event = obs.path.wrt('SUN').event_at_time(FITS_HEADER['SPCSCET'])
-    assert obs.time[0] == pytest.approx(LABEL_START + 2., abs=1.e-6)
-    assert event.pos.vals == pytest.approx([-1.e8, -2.e8, -3.e8])
+                                             sun_path: oops.Path, dt: float) -> None:
+    # The header's position and velocity are those at SPCSCET; a velocity of 1000 km/s
+    # makes an epoch even 1 microsecond off show as 1 m
+    velocity = {'SPCSSCVX': 1000., 'SPCSSCVY': 0., 'SPCSSCVZ': 0.}
+    obs = from_label(tmp_path, START_TIME='2007-01-10T05:41:10.363', geom='fits',
+                     fits_keywords=velocity)
+    event = obs.path.wrt('SUN').event_at_time(FITS_HEADER['SPCSCET'] + dt)
+    assert event.pos.vals == pytest.approx([-1.e8 - 1000. * dt, -2.e8, -3.e8],
+                                           rel=0., abs=1.e-4)
 
 
 def test_null_values_stay_in_the_raw_dicts(tmp_path: pathlib.Path) -> None:
@@ -250,6 +328,38 @@ def test_null_values_stay_in_the_raw_dicts(tmp_path: pathlib.Path) -> None:
     assert obs.label_dict['TARGET_NAME'] == 'N/A'
     assert obs.header_dict['SPCCBTNM'] == '---'
     assert obs.target == 'NONE'
+
+
+@pytest.mark.parametrize('null', ['UNKNOWN', '', '  ', 'unk', '---'])
+def test_header_null_values_are_left_out_of_dict(tmp_path: pathlib.Path,
+                                                 null: str) -> None:
+    obs = from_label(tmp_path, fits_keywords={'SPCTCB': null})
+    assert 'SPCTCB' not in obs.dict
+
+
+@pytest.mark.parametrize('null', ['"UNKNOWN"', '""', '"N/A"'])
+def test_label_null_values_are_left_out_of_dict(tmp_path: pathlib.Path,
+                                                null: str) -> None:
+    obs = from_label(tmp_path, extra=(f'NEWHORIZONS:OBSERVATION_DESC = {null}',))
+    assert 'NEWHORIZONS:OBSERVATION_DESC' not in obs.dict
+
+
+def test_list_of_nulls_is_left_out_of_dict(tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path,
+                     extra=('SC_TARGET_POSITION_VECTOR = ("N/A", "N/A", "N/A")',))
+    assert 'SC_TARGET_POSITION_VECTOR' not in obs.dict
+
+
+def test_null_inside_a_vector_is_none_in_dict(tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path, extra=('SC_TARGET_POSITION_VECTOR = (1.0, "N/A", 3.0)',))
+    assert obs.dict['SC_TARGET_POSITION_VECTOR'] == [1.0, None, 3.0]
+
+
+def test_null_inside_an_object_is_left_out_of_dict(tmp_path: pathlib.Path) -> None:
+    obs = from_label(tmp_path, extra=('OBJECT = THING', '  NAME = "N/A"', '  SIZE = 3',
+                                      'END_OBJECT = THING'))
+    assert 'NAME' not in obs.dict['THING']
+    assert obs.dict['THING']['SIZE'] == 3
 
 ##########################################################################################
 # Values the Snapshot needs
@@ -269,7 +379,7 @@ def test_fits_file_without_a_needed_item(tmp_path: pathlib.Path, keyword: str,
 
 
 @pytest.mark.parametrize(('keywords', 'lines', 'message'), [
-    ({'START_TIME': None}, 1024, 'no START_TIME for LORRI image .*lor_test.lbl'),
+    ({'START_TIME': None}, 1024, 'no START_TIME for LORRI image .*lor_test.fit'),
     ({'EXPOSURE_DURATION': None}, 1024, 'no EXPOSURE_DURATION for LORRI image'),
     ({}, None, 'no lines of the image'),
 ])
@@ -294,7 +404,7 @@ NOTE = ('NOTE =', '"a note that starts', 'on the next line"')
 @pytest.mark.parametrize(('extra', 'expected'), [
     (NOTE, {'NOTE': 'a note that starts\non the next line'}),
     (NOTE + ('WORDS = {a, b c}',), {'NOTE': 'a note that starts\non the next line',
-                                    'WORDS': {'a', 'b', 'c'}}),
+                                    'WORDS': ['a', 'b', 'c']}),
 ])
 def test_label_parser_falls_back(tmp_path: pathlib.Path, extra: tuple[str, ...],
                                  expected: dict[str, Any]) -> None:
@@ -350,31 +460,78 @@ def test_invalid_label_parser_options(tmp_path: pathlib.Path, options: dict[str,
 ##########################################################################################
 
 
-def no_pointing(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
-    """Make the camera frame raise RuntimeError(message) when it is evaluated."""
+def no_pointing(monkeypatch: pytest.MonkeyPatch, message: str,
+                error: type[Exception] = RuntimeError) -> None:
+    """Make the camera frame raise `error(message)` when it is evaluated."""
 
     def transform_at_time(self: Any, *args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError(message)
+        raise error(message)
 
     monkeypatch.setattr(oops.frame.Cmatrix, 'transform_at_time', transform_at_time)
 
 
-def test_missing_pointing_raises_host_error(tmp_path: pathlib.Path,
-                                            monkeypatch: pytest.MonkeyPatch) -> None:
-    path = write_fits(tmp_path / 'lor_test.fit')
+# The synthetic image's midtime, SPCSCET, is 2007-01-10T05:41:10.863 UTC
+@pytest.mark.parametrize('suffix', ['fit', 'lbl'])
+def test_missing_pointing_raises_oops_spice_error(tmp_path: pathlib.Path,
+                                                  monkeypatch: pytest.MonkeyPatch,
+                                                  suffix: str) -> None:
+    label_and_fits(tmp_path)
     no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT) -- sxform -- insufficient data')
-    with pytest.raises(oops.host.HostError,
-                       match=r'no New Horizons LORRI pointing for .*lor_test.fit: '
-                             r'SPICE\(NOFRAMECONNECT\)'):
+    with pytest.raises(oops.OopsSpiceError,
+                       match=r'^no New Horizons LORRI pointing at '
+                             r'2007-01-10T05:41:10\.863 for .*lor_test\.fit: '
+                             r'SPICE\(NOFRAMECONNECT\)$'):
+        NewHorizonsLORRI.from_file(tmp_path / f'lor_test.{suffix}')
+
+
+def test_missing_pointing_error_attributes(tmp_path: pathlib.Path,
+                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    no_pointing(monkeypatch, 'SPICE(CKINSUFFDATA) -- no data')
+    with pytest.raises(oops.OopsSpiceError) as excinfo:
+        NewHorizonsLORRI.from_file(path)
+    assert excinfo.value.spice_code == 'SPICE(CKINSUFFDATA)'
+    assert excinfo.value.filepath == FCPath(path)
+    assert not isinstance(excinfo.value, oops.host.HostError)
+
+
+# The classes of exception that cspyce raises
+@pytest.mark.parametrize('error', [LookupError, KeyError, OSError, RuntimeError,
+                                   ValueError])
+def test_each_spice_exception_class_is_missing_pointing(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        error: type[Exception]) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT)', error)
+    with pytest.raises(oops.OopsSpiceError):
         NewHorizonsLORRI.from_file(path)
 
 
 def test_other_pointing_errors_pass_through(tmp_path: pathlib.Path,
                                             monkeypatch: pytest.MonkeyPatch) -> None:
     path = write_fits(tmp_path / 'lor_test.fit')
-    no_pointing(monkeypatch, 'something else')
-    with pytest.raises(RuntimeError, match='something else'):
+    no_pointing(monkeypatch, 'something else', TypeError)
+    with pytest.raises(TypeError, match='something else'):
         NewHorizonsLORRI.from_file(path)
+
+
+def test_pointing_is_not_checked_with_a_cmatrix(tmp_path: pathlib.Path,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    frame = oops.frame.Cmatrix(oops.Matrix3([[0, 1, 0], [-1, 0, 0], [0, 0, 1]]),
+                               oops.Frame.J2000, frame_id='GIVEN_CMATRIX')
+    no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT)')
+    obs = NewHorizonsLORRI.from_file(path, frame=frame)
+    assert obs.frame.frame_id == frame.frame_id
+
+
+def test_from_index_never_checks_pointing(monkeypatch: pytest.MonkeyPatch) -> None:
+    no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT)')
+    row = {'VOLUME_ID': 'NHJULO_2001', 'FILE_SPECIFICATION_NAME': 'data/lor_test.lbl',
+           'START_TIME': '2007-01-10T05:41:08.363', 'EXPOSURE_DURATION': 5.,
+           'BINNING_MODE': '1x1'}
+    (obs,) = NewHorizonsLORRI.from_index('index.lbl', row_dicts=[row])
+    assert obs.basename == 'lor_test.fit'
 
 
 def test_pointing_is_checked_at_the_cadence_override(

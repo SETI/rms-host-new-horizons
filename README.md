@@ -82,15 +82,22 @@ snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
   one the file stores; a calibrated image also carries its error estimates and quality
   flags. `astrometry=True` reads no image data, and given a PDS3 label it reads the label
   alone, without the FITS file.
-- Where the label and the FITS header disagree, a rule for each value chooses the better
-  one. For example, where only one of the two target names is a body that SPICE knows,
-  that name is used: the header's "CALLIRRHOE" rather than the label's "J17 CALLIRRHOE",
-  but the label's "KERBEROS" rather than the header's "RADEC=270.66,-14.63=P4"; where
-  neither or both are, the label's is used. The start time and exposure duration are the
-  header's when the label gives the same value rounded to the millisecond, and the
-  label's otherwise. A value that neither gives is left out rather than set to None.
+- Where the label and the FITS header disagree, each value always comes from the one of
+  the two that is accurate for it. The start time, the exposure duration, and the image
+  size come from the FITS header; the label gives the start time rounded to the
+  millisecond. The target name and the spacecraft clock counts come from the label; the
+  header's target name is the data pipeline's guess, such as "FJUPITER" for Jupiter. A
+  value that neither gives is left out rather than set to None, and so are the archive's
+  null values, such as "N/A" and "UNKNOWN".
+- The target body is the name SPICE knows the body by, translated from the label's form
+  of the name: "J17 CALLIRRHOE" gives CALLIRRHOE, "136472 MAKEMAKE" gives MAKEMAKE, and
+  "ASTEROID 486958 (2014 MU69)" gives ARROKOTH.
 - The spacecraft clock counts at the start and end of the exposure are given as they
-  appear in the PDS3 label.
+  appear in the PDS3 label. The metadata, the PDS3 label, and the FITS headers are
+  published as dictionaries that can be written as JSON.
+- An image whose pointing the C kernels do not cover raises `oops.OopsSpiceError`, with
+  the SPICE error code in its message. Giving a frame, or taking the pointing from the
+  FITS header, skips that check.
 - The pointing comes from the C kernels, or from the FITS header with
   `pointing='fits'`; the spacecraft's position comes from the SP kernels, or from the
   FITS header with `geom='fits'`. The camera distortion is modeled by a polynomial,
