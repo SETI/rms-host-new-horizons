@@ -24,7 +24,8 @@ Every image becomes an OOPS :class:`~oops.observation.Snapshot`, with the image 
 is the primary image exactly as the FITS file stores it. A raw image holds a few columns
 beyond the field of view, and ``data`` keeps them. A calibrated image also holds its
 error estimates and its quality flags, which the host gives as the ``error`` and
-``quality`` subfields. A raw image has neither.
+``quality`` subfields. A raw image has neither, and an astrometry read gives none of
+the three arrays.
 
 Binning modes and fields of view
 ================================

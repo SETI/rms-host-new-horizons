@@ -6,10 +6,10 @@ Time
 ====
 
 ``START_TIME`` is the start of the exposure. The exposure lasts ``EXPOSURE_DURATION``,
-and the Snapshot's cadence covers exactly that interval. From the FITS header, the start
-is ``SPCSCET``, the middle of the exposure in seconds TDB, less half of ``EXPTIME``.
-The PDS3 label gives the same start in UTC, rounded to the millisecond, and the header's
-value is used when both are read (see :doc:`user_guide_metadata`).
+and the Snapshot's default cadence covers exactly that interval. From the FITS header,
+the start is ``SPCSCET``, the middle of the exposure in seconds TDB, less half of
+``EXPTIME``. The PDS3 label gives the same start in UTC, rounded to the millisecond, and
+the header's value is used when both are read (see :doc:`user_guide_metadata`).
 
 If no label read gives a start time, the host converts
 ``SPACECRAFT_CLOCK_START_COUNT`` to a time with the SPICE clock kernel. An image cannot

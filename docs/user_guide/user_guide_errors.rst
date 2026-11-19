@@ -13,10 +13,11 @@ Reading an image file
 :exc:`oops.OopsSpiceError`
     The C kernels hold no pointing for the camera at the middle of the exposure. The
     message gives the time and the FITS file, and ends with the SPICE error code, such
-    as ``SPICE(NOFRAMECONNECT)``. It is never raised when the caller supplies the
-    pointing with the ``frame`` override, or takes it from the FITS header with the
-    ``pointing`` option. It is also raised when no label read gives a start time and
-    the clock kernel cannot convert the clock count.
+    as ``SPICE(NOFRAMECONNECT)``. It is never raised for missing pointing when the
+    caller supplies the pointing with the ``frame`` override, or takes it from the FITS
+    header with the ``pointing`` option. Whatever the pointing, it is also raised when
+    no label read gives a start time and the clock kernel cannot convert the clock
+    count.
 
 :exc:`~oops.host.HostFormatError`
     No label read gives the exposure duration, the lines of the image, or either a

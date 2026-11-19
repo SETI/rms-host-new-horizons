@@ -83,9 +83,10 @@ out only when all of its components are zero.
 The subfields are those of an image read from its label (see
 :doc:`user_guide_metadata`), except ``data``, ``error``, ``quality``, ``label_dict``,
 ``header_dict``, and ``headers``. The binning mode comes from the ``BINNING_MODE``
-column. The pointing always comes from the C kernels unless the ``frame`` override is
-given, and the position from the SPICE ephemerides. A row has no I/F calibration,
-because it gives no RSOLAR.
+column. By default the pointing comes from the C kernels and the position from the
+SPICE ephemerides, and the ``frame`` and ``path`` overrides replace them. A row has no
+default I/F calibration, because it gives no RSOLAR, but the ``calibrations`` override
+supplies one.
 
 The host does not check the C kernels for the pointing of an index row. If the kernels
 hold no pointing for an image, its row still gives a Snapshot, and the error appears

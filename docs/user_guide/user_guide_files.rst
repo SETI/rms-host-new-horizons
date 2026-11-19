@@ -49,7 +49,9 @@ Finding the FITS file
 Given a PDS3 label, the host looks in the label's directory for the FITS file that the
 label's ``^IMAGE`` pointer gives. The archive spells the FITS file's name in the same
 case as the label's, so the host tries that case first, then the name as the label
-spells it, then the name in lower case, and last in upper case. A path that ends in
+spells it, then the name in lower case, and last in upper case. An astrometry read does
+not look for the file, so its path subfields give the name in the case of the label's
+own name. A path that ends in
 ``.fit`` or ``.fits``, in any case, is read as a FITS file, and any other path as a PDS3
 label.
 
