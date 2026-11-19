@@ -115,13 +115,17 @@ described below.
   is local or cached. `_row_as_json()` does not apply the table reader's masks as they
   are, because the supplements declare zero as the null constant of vectors where a zero
   can be real (see the comment at `_TARGET_GEOMETRY`). Given
-  `row_dicts`, it reads neither table. `_read_index_and_supplement()` matches rows on `VOLUME_ID` and
-  `FILE_SPECIFICATION_NAME` in any order (the NHJULO_1001 index lists
-  `lor_0035089864_0x632_eng` last instead of at row 678, where the sorted supplement has
-  it), and the supplement, which follows the labels, wins every shared column (the index
-  gives clock counts with a partition, rounds the stop count differently, gives
-  PRODUCT_CREATION_TIME as a date alone, and shortens some TARGET_NAMEs). `oops.Host.from_index()` reads the rows itself with the default
-  validation, which compares every shared column, so it fails on these indexes.
+  `row_dicts`, it reads neither table. `oops.Host._read_index_rows()` pairs the rows by
+  position when the two tables list the same files in the same order and otherwise by
+  `VOLUME_ID` and `FILE_SPECIFICATION_NAME` (`file_key=_INDEX_KEYS`; the NHJULO_1001
+  index lists `lor_0035089864_0x632_eng` last instead of at row 678, where the sorted
+  supplement has it, and NHxxLO_1999 departs from its supplement's order at row 1924).
+  It checks only those two columns (`validate=_INDEX_KEYS`), and the supplement, which
+  follows the labels, wins every shared column (`prefer_supplement=True`; the index gives
+  clock counts with a partition, rounds the stop count differently, gives
+  PRODUCT_CREATION_TIME as a date alone, and shortens some TARGET_NAMEs).
+  `oops.Host.from_index()` identifies the host from the index label and passes the call
+  to `from_index()`, which reads the rows.
 - `from_index()` returns an iterator. It checks its arguments and reads and filters the
   tables itself, then returns a generator that builds each row's Snapshot when the
   iteration reaches it, so only an error in one row waits for that row. It must not be a

@@ -50,9 +50,10 @@ Reading a PDS3 index
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` raises:
 
 :exc:`~oops.host.HostIndexError`
-    ``supplement`` is None and ``row_dicts`` is not given; the supplement and the index
-    do not list the same images, each once; or the index's file name holds no
-    ``_index`` from which to find the supplement.
+    ``supplement`` is None and ``row_dicts`` is not given; an image appears in only one
+    of the index and the supplement; the two tables list the images in different orders
+    and one of them lists an image twice; or the index's file name holds no ``_index``
+    from which to find the supplement.
 
 :exc:`FileNotFoundError`
     The supplemental index does not exist.

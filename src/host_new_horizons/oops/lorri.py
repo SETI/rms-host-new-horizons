@@ -111,7 +111,16 @@ _FITS_FILL = -1.e32
 # The ticks of the New Horizons spacecraft clock per second
 _SCLK_TICKS = 50000
 
-# The columns that identify the same image in an index and its supplement
+# The columns that identify the same image in an index and its supplement. The two tables
+# are paired by them, not by position, where their orders differ: the index of NHJULO_1001
+# lists lor_0035089864_0x632_eng last instead of at row 678, where its supplement, which
+# is sorted, lists it, and the cumulative index NHxxLO_1999 departs from its supplement's
+# order at row 1924. The other columns the two tables share are written differently: the
+# index gives each clock count with its partition, as in "1/0030598438:48850", rounds the
+# stop count differently from the label, gives PRODUCT_CREATION_TIME as a date without a
+# time, and shortens some target names, as in "50000 QUAOAR (2002 LM)", whereas the
+# supplement copies the label. So only these columns are compared, and the supplement's
+# value of a shared column is kept.
 _INDEX_KEYS = ('VOLUME_ID', 'FILE_SPECIFICATION_NAME')
 
 # The null constants that the label of a supplement declares are not all null values.
@@ -579,12 +588,13 @@ class NewHorizonsLORRI(oops.Host):
             supplement (str | pathlib.Path | FCPath | object, optional): The path to the
                 PDS label of the supplemental index, whose columns are merged into each
                 row; a LORRI index needs its supplement. Its rows must name the same
-                files as the index's, matched on VOLUME_ID and FILE_SPECIFICATION_NAME,
-                in any order. Where both tables give a column, the supplement's value is
-                kept, because the supplement is spelled as the product labels are. The
-                default, `oops.Host.SUPPLEMENT`, reads the file in the directory of
-                `filepath` whose name matches except that "_index" is replaced by
-                "_supplemental_index" in upper or lower case.
+                files as the index's: they are paired by position where the two tables
+                list the files in the same order, and otherwise by VOLUME_ID and
+                FILE_SPECIFICATION_NAME. Where both tables give a column, the
+                supplement's value is kept, because the supplement is spelled as the
+                product labels are. The default, `oops.Host.SUPPLEMENT`, reads the file
+                in the directory of `filepath` whose name matches except that "_index"
+                is replaced by "_supplemental_index" in upper or lower case.
             label (Pds3Label, optional): The PDS label of `filepath` if it has already
                 been read.
             row_dicts (list[dict[str, Any]], optional): A list of dictionaries, one per
@@ -685,9 +695,10 @@ class NewHorizonsLORRI(oops.Host):
                 neither START_TIME nor SPACECRAFT_CLOCK_START_COUNT; raised when the
                 iteration reaches that row.
             oops.host.HostIndexError: If `supplement` is None while `row_dicts` is not
-                given, if the supplement and the index do not list the same files, each
-                once, or if `supplement` is `oops.Host.SUPPLEMENT` and the name of
-                `filepath` contains no "_index".
+                given; if an index row has no supplement row or a supplement row belongs
+                to no index row; if, where the two tables list the files in different
+                orders, either lists a file twice; or if `supplement` is
+                `oops.Host.SUPPLEMENT` and the name of `filepath` contains no "_index".
             oops.host.WrongHostError: If `filepath` is not a New Horizons LORRI index.
             OSError: If `filepath`, or a `supplement` that is specified, does not exist or
                 cannot be read.
@@ -711,8 +722,12 @@ class NewHorizonsLORRI(oops.Host):
             if supplement is None:
                 raise oops.host.HostIndexError(f'{NewHorizonsLORRI.NAME} index needs its '
                                                f'supplemental index: {filepath}')
-            row_dicts = NewHorizonsLORRI._read_index_and_supplement(
-                filepath, supplement, pds3_options=pds3_options, label=label)
+            row_dicts = NewHorizonsLORRI._read_index_rows(filepath, supplement=supplement,
+                                                          validate=_INDEX_KEYS,
+                                                          file_key=_INDEX_KEYS,
+                                                          prefer_supplement=True,
+                                                          pds3_options=pds3_options,
+                                                          label=label)
         row_dicts = oops.Host._filter_index_rows(row_dicts, filter)
 
         overrides = {
@@ -1788,78 +1803,6 @@ class NewHorizonsLORRI(oops.Host):
                                    / np.sqrt(denom**2 + xi**2))
 
         return (ra, dec)
-
-    @staticmethod
-    def _read_index_and_supplement(filepath, supplement, *, pds3_options, label=None):
-        """The rows of an index, each merged with the row of its supplement for the same
-        image.
-
-        The rows are matched on :data:`_INDEX_KEYS` rather than by position, because the
-        index of NHJULO_1001 lists one image, lor_0035089864_0x632_eng, last instead of
-        at row 678, where its supplement, which is sorted, lists it. The other columns
-        the two tables share are written differently: the index gives each clock count
-        with its partition, as in "1/0030598438:48850", rounds the stop count differently
-        from the label, gives PRODUCT_CREATION_TIME as a date without a time, and
-        shortens some target names, as in "50000 QUAOAR (2002 LM)", whereas the
-        supplement copies the label. So the supplement's value of a shared column is
-        kept.
-
-        Parameters:
-            filepath (str | pathlib.Path | FCPath): The path to the label of the index.
-            supplement (str | pathlib.Path | FCPath | object): The path to the label of
-                the supplement, or :data:`oops.Host.SUPPLEMENT` for the file beside the
-                index whose name has "_supplemental_index" in place of "_index".
-            pds3_options (dict[str, Any] | None): The options for the PDS3 label parser.
-            label (Pds3Label, optional): The label of the index if it has already been
-                read.
-
-        Returns:
-            list[dict[str, Any]]: One dictionary per row of the index, in its order.
-
-        Raises:
-            FileNotFoundError: If the supplement does not exist.
-            oops.host.HostIndexError: If the two tables do not list the same images, each
-                once, or if `supplement` is :data:`oops.Host.SUPPLEMENT` and the name of
-                `filepath` contains no "_index".
-            oops.host.WrongHostError: If either table is not a New Horizons LORRI index.
-        """
-
-        filepath = FCPath(filepath)
-        if supplement is oops.Host.SUPPLEMENT:
-            name = (filepath.name.replace('_index', '_supplemental_index')
-                                 .replace('_INDEX', '_SUPPLEMENTAL_INDEX'))
-            if name == filepath.name:
-                raise oops.host.HostIndexError(f'supplemental index required for '
-                                               f'{filepath}')
-            supplement = filepath.with_name(name)
-
-        row_dicts = NewHorizonsLORRI._read_index_rows(filepath, supplement=None,
-                                                      pds3_options=pds3_options,
-                                                      label=label)
-        supp_dicts = NewHorizonsLORRI._read_index_rows(supplement, supplement=None,
-                                                       pds3_options=pds3_options)
-
-        def key(row_dict):
-            return tuple(str(row_dict[name]) for name in _INDEX_KEYS)
-
-        supp_by_key = {}
-        for supp_dict in supp_dicts:
-            if key(supp_dict) in supp_by_key:
-                raise oops.host.HostIndexError(f'supplemental index lists '
-                                               f'{key(supp_dict)} twice: {supplement}')
-            supp_by_key[key(supp_dict)] = supp_dict
-
-        index_keys = {key(row_dict) for row_dict in row_dicts}
-        if len(index_keys) != len(row_dicts):
-            raise oops.host.HostIndexError(f'index lists an image twice: {filepath}')
-        if index_keys != supp_by_key.keys():
-            missing = sorted(index_keys - supp_by_key.keys())
-            extra = sorted(supp_by_key.keys() - index_keys)
-            raise oops.host.HostIndexError(
-                f'index files list different images: {filepath}, {supplement}; '
-                f'only in the index: {missing[:3]}; only in the supplement: {extra[:3]}')
-
-        return [row_dict | supp_by_key[key(row_dict)] for row_dict in row_dicts]
 
     ######################################################################################
     # Detectors

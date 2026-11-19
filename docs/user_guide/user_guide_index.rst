@@ -45,10 +45,14 @@ The ``supplement`` argument chooses the supplemental index:
 - A path or URL reads that file instead.
 - None raises :exc:`~oops.host.HostIndexError`, unless ``row_dicts`` is given.
 
-The two tables must list the same images, each once, but not necessarily in the same
-order. The host matches the rows by their ``VOLUME_ID`` and ``FILE_SPECIFICATION_NAME``
-and raises :exc:`~oops.host.HostIndexError` if an image is listed twice or appears in
-only one of the tables. The Snapshots come in the order of the index.
+The two tables must list the same images, but not necessarily in the same order. When
+they list them in the same order, each index row is merged with the supplement row in
+the same position. When they do not, as in ``NHJULO_1001`` and ``NHxxLO_1999``, each
+index row is merged with the supplement row that has the same ``VOLUME_ID`` and
+``FILE_SPECIFICATION_NAME``. The host raises :exc:`~oops.host.HostIndexError` if an
+image appears in only one of the tables, or if, when the orders differ, either table
+lists an image twice. The error names the first few such images and both tables. The
+Snapshots come in the order of the index.
 
 Other arguments
 ===============
@@ -122,8 +126,7 @@ only when the FITS file is local or already in the local cache.
 Reading an index through oops.Host
 ==================================
 
-:meth:`oops.host.Host.from_index` cannot read a LORRI index. It requires the index and
-the supplement to agree in every column they share, but the two tables write the clock
-counts, the product creation time, and some target names differently, so the rows fail
-that test. Call :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index`
-instead.
+:meth:`oops.host.Host.from_index` recognizes a LORRI index from its label and passes it,
+with its other arguments, to
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index`, so the two give the
+same Snapshots.

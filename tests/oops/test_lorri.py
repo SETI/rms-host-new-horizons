@@ -1051,6 +1051,12 @@ def test_from_index_with_supplement() -> None:
     assert len(obs) == 30
 
 
+def test_oops_host_from_index_passes_the_index_to_this_host() -> None:
+    dispatched = oops.Host.from_index(INDEX, supplement=SUPPLEMENT)
+    direct = NewHorizonsLORRI.from_index(INDEX, supplement=SUPPLEMENT)
+    assert [obs.dict for obs in dispatched] == [obs.dict for obs in direct]
+
+
 def copy_index(tmp_path: pathlib.Path, *, index: bool = True,
                supplement: bool = True) -> pathlib.Path:
     """Copy the edited index and supplement into `tmp_path`; return the index label."""
@@ -1093,9 +1099,9 @@ def test_from_index_rejects_a_mismatched_supplement(tmp_path: pathlib.Path) -> N
     content = table.read_bytes()
     table.write_bytes(content.replace(b'lor_0030713591_0x633', b'lor_0030713591_0x999'))
     with pytest.raises(oops.host.HostIndexError,
-                       match=r"index files list different images: .*only in the index: "
-                             r"\[\('NHJULO_2001', 'data/20070110_003071/"
-                             r"lor_0030713591_0x633_sci.lbl'\)\]"):
+                       match=r"no supplement row for an index row \(1\): "
+                             r"\['NHJULO_2001/data/20070110_003071/"
+                             r"lor_0030713591_0x633_sci.lbl'\]"):
         NewHorizonsLORRI.from_index(index)
 
 
@@ -1121,9 +1127,9 @@ def test_from_index_matches_supplement_rows_in_another_order(
 def test_from_index_rejects_a_supplement_row_given_twice(tmp_path: pathlib.Path) -> None:
     index = rewrite_supplement_rows(tmp_path, lambda rows: rows[:-1] + rows[:1])
     with pytest.raises(oops.host.HostIndexError,
-                       match=r"supplemental index lists \('NHJULO_2001', "
-                             r"'data/20070110_003070/lor_0030702839_0x630_sci.lbl'\) "
-                             r"twice"):
+                       match=r"supplement lists a file more than once \(1\): "
+                             r"\['NHJULO_2001/data/20070110_003070/"
+                             r"lor_0030702839_0x630_sci.lbl'\]"):
         NewHorizonsLORRI.from_index(index)
 
 
@@ -1132,7 +1138,8 @@ def test_from_index_rejects_an_index_row_given_twice(tmp_path: pathlib.Path) -> 
     table = tmp_path / 'NHJULO_2001_index_edited.tab'
     rows = table.read_bytes().splitlines(keepends=True)
     table.write_bytes(b''.join(rows[:-1] + rows[:1]))
-    with pytest.raises(oops.host.HostIndexError, match='index lists an image twice'):
+    with pytest.raises(oops.host.HostIndexError,
+                       match=r'index lists a file more than once \(1\)'):
         NewHorizonsLORRI.from_index(index)
 
 
@@ -1236,7 +1243,7 @@ def test_from_index_uses_a_given_label(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(NewHorizonsLORRI, '_read_index_rows', spy)
     NewHorizonsLORRI.from_index(INDEX, label=label)
-    assert labels == [label, None]      # the index's, then the supplement's
+    assert labels == [label]
 
 
 def test_from_index_rejects_an_unknown_keyword() -> None:
