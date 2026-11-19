@@ -410,6 +410,8 @@ def test_from_file_target(tmp_path: pathlib.Path, label_target: str, target: str
     (None, 'NONE'),
 ])
 def test_target_body(name: str | None, body: str) -> None:
+    """Each form of name translates by its fixed rule; any other name stays as it is."""
+
     assert NewHorizonsLORRI._target_body(name) == body
 
 
@@ -502,12 +504,16 @@ ALL_PLANETS = [1, 199, 2, 299, 3, 399, 4, 499, 5, 599, 6, 699, 7, 799, 8, 899, 9
 
 def test_from_file_return_all_planets(tmp_path: pathlib.Path,
                                       fake_spicedb: FakeSpiceDB) -> None:
+    """The planets come first, and the target, a moon, is kept after them."""
+
     _ = load(tmp_path, fits_keywords={'SPCCBTNM': 'CALLIRRHOE'}, return_all_planets=True)
     (_, kwargs) = fake_spicedb.named('used_basenames')[0]
     assert kwargs['bodies'] == ALL_PLANETS + [517]
 
 
 def test_from_index_return_all_planets(fake_spicedb: FakeSpiceDB) -> None:
+    """A target that is one of the planets is not listed twice."""
+
     _ = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(TARGET_NAME='JUPITER')],
                                     return_all_planets=True)
     (_, kwargs) = fake_spicedb.named('used_basenames')[0]

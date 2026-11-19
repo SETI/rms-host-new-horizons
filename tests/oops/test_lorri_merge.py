@@ -320,11 +320,16 @@ def test_undefined_header_card_counts_as_missing(tmp_path: pathlib.Path) -> None
 def test_fits_geometry_uses_the_header_epoch(tmp_path: pathlib.Path,
                                              sun_path: oops.Path, dt: float) -> None:
     """The header's position and velocity are those at SPCSCET, not at the observation's
-    midtime; a velocity of 1000 km/s makes an epoch even 1 microsecond off show as 1 m."""
+    midtime; a velocity of 1000 km/s makes an epoch even 1 microsecond off show as 1 m.
 
-    velocity = {'SPCSSCVX': 1000., 'SPCSSCVY': 0., 'SPCSSCVZ': 0.}
+    Without EXPTIME the header gives no start time, so the label's, 2 s later, sets a
+    midtime that differs from SPCSCET.
+    """
+
+    keywords = {'SPCSSCVX': 1000., 'SPCSSCVY': 0., 'SPCSSCVZ': 0., 'EXPTIME': None}
     obs = from_label(tmp_path, START_TIME='2007-01-10T05:41:10.363', geom='fits',
-                     fits_keywords=velocity)
+                     fits_keywords=keywords)
+    assert obs.midtime == pytest.approx(FITS_HEADER['SPCSCET'] + 2., abs=1.e-3)
     event = obs.path.wrt('SUN').event_at_time(FITS_HEADER['SPCSCET'] + dt)
     assert event.pos.vals == pytest.approx([-1.e8 - 1000. * dt, -2.e8, -3.e8],
                                            rel=0., abs=1.e-4)
@@ -514,7 +519,7 @@ def test_each_spice_exception_class_is_missing_pointing(
 
     path = write_fits(tmp_path / 'lor_test.fit')
     no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT)', error)
-    with pytest.raises(oops.OopsSpiceError):
+    with pytest.raises(oops.OopsSpiceError, match=r'SPICE\(NOFRAMECONNECT\)$'):
         NewHorizonsLORRI.from_file(path)
 
 
