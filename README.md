@@ -81,12 +81,13 @@ from host_new_horizons import NewHorizonsLORRI
 
 snapshot = NewHorizonsLORRI.from_file(
     'NHJULO_2001/data/20070110_003071/lor_0030713591_0x633_sci.lbl')
-snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
+snapshots = list(NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl'))
 ```
 
 Replace each path with the location of the file in your copy of the archive, or with
 its URL. `from_index` also reads the supplemental index beside the index, which must
-exist.
+exist. It returns an iterator, which builds each image's Snapshot when the loop reaches
+it; `list()` builds them all at once.
 
 # Documentation
 

@@ -59,10 +59,12 @@ Reading a PDS3 index
 
 :exc:`~oops.host.HostFormatError`
     A row's ``BINNING_MODE`` is missing or is not ``1X1`` or ``4X4``, or a row gives no
-    exposure duration, or neither a start time nor a clock count.
+    exposure duration, or neither a start time nor a clock count. This error is raised
+    when the iteration reaches that row.
 
 :exc:`oops.OopsSpiceError`
-    A row gives no start time, and the clock kernel cannot convert its clock count.
+    A row gives no start time, and the clock kernel cannot convert its clock count. This
+    error is raised when the iteration reaches that row.
 
 :exc:`~oops.OopsTypeError`
     A keyword argument is not one that the method accepts.

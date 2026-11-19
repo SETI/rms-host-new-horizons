@@ -568,7 +568,10 @@ class NewHorizonsLORRI(oops.Host):
                    path=None, frame=None, cadence=None, fov=None, calibrations=None,
                    timeshift=None, navigation=None, tracker=None, parallel=None,
                    **kwargs):
-        """A list of Snapshot objects, one for each row of a New Horizons LORRI index.
+        """An iterator over Snapshots, one for each row of a New Horizons LORRI index.
+
+        The arguments are checked, and the index is read and filtered, when this method is
+        called; each row's Snapshot is built when the iteration reaches that row.
 
         Parameters:
             filepath (str | pathlib.Path | FCPath): The full path to a New Horizons LORRI
@@ -593,7 +596,7 @@ class NewHorizonsLORRI(oops.Host):
                 their values or a set or tuple of values. If provided, only rows of the
                 index in which each named column equals the value, falls in the set of
                 values, or falls in a range defined by a tuple of two values, will be
-                included in the returned list.
+                included.
             fov_type (str, optional): "fast", "slow" or "flat", as for :meth:`from_file`.
             return_all_planets (bool, optional): Include in `spice_kernels` the kernels
                 of every planet and of Pluto, as for :meth:`from_file`.
@@ -636,15 +639,17 @@ class NewHorizonsLORRI(oops.Host):
             **kwargs: Any other keyword argument raises an error.
 
         Returns:
-            list[Snapshot]: One observation per row of the index, in the index's order,
-            each with subfields `dict`, `host`, `instrument`, `binning_mode`,
-            `spice_kernels`, `filepath`, `basename`, `image_url`, `spice_to_frame`,
-            `spice_frame_name` and `spice_frame_id` inserted, `abspath` if the FITS file
-            is local or already in the local cache, and `label_target`,
-            `spacecraft_clock_start_count` and `spacecraft_clock_stop_count` where the
-            row gives TARGET_NAME and the clock counts with values that do not count as
-            missing, as for :meth:`from_file`. The calibrations are empty, because a row
-            gives no RSOLAR. `dict` is the row, merged with its row of the supplement,
+            collections.abc.Iterator[Snapshot]: One observation per filtered row of the
+            index, in the index's order, each with subfields `dict`, `host`,
+            `instrument`, `binning_mode`, `spice_kernels`, `filepath`, `basename`,
+            `image_url`, `spice_to_frame`, `spice_frame_name` and `spice_frame_id`
+            inserted, `abspath` if the FITS file is local or already in the local cache,
+            and `label_target`, `spacecraft_clock_start_count` and
+            `spacecraft_clock_stop_count` where the row gives TARGET_NAME and the clock
+            counts with values that do not count as missing, as for :meth:`from_file`.
+            The calibrations are empty, because a row gives no RSOLAR.
+
+            `dict` is the row, merged with its row of the supplement,
             without the masks of the table reader or NumPy types, so that it can be
             written as JSON, and without any value that counts as missing: a PDS3 null
             such as "N/A", and a value that the table reader masks as its column's null
@@ -670,13 +675,15 @@ class NewHorizonsLORRI(oops.Host):
         Raises:
             FileNotFoundError: If the supplement does not exist.
             oops.OopsSpiceError: If a row gives no START_TIME and the spacecraft clock
-                kernel cannot convert its SPACECRAFT_CLOCK_START_COUNT.
+                kernel cannot convert its SPACECRAFT_CLOCK_START_COUNT; raised when the
+                iteration reaches that row.
             oops.OopsTypeError: If a keyword argument is not one of those listed.
             oops.OopsValueError: If `fov_type` is not "fast", "slow" or "flat", or if
                 `select` is not None.
             oops.host.HostFormatError: If a row's BINNING_MODE is missing or not "1X1"
                 or "4X4" in either case, or if a row gives no EXPOSURE_DURATION, or
-                neither START_TIME nor SPACECRAFT_CLOCK_START_COUNT.
+                neither START_TIME nor SPACECRAFT_CLOCK_START_COUNT; raised when the
+                iteration reaches that row.
             oops.host.HostIndexError: If `supplement` is None while `row_dicts` is not
                 given, if the supplement and the index do not list the same files, each
                 once, or if `supplement` is `oops.Host.SUPPLEMENT` and the name of
@@ -722,16 +729,16 @@ class NewHorizonsLORRI(oops.Host):
             'parallel'    : parallel,
         }
 
-        # Create the list of Snapshot objects
+        # Build each row's Snapshot when the iteration reaches it
         volumes = NewHorizonsLORRI._volumes_directory(filepath)
-        snapshots = []
-        for row_dict in row_dicts:
-            obs = NewHorizonsLORRI._snapshot_from_row(
-                row_dict, volumes=volumes, fov_type=fov_type,
-                return_all_planets=return_all_planets, overrides=overrides)
-            snapshots.append(obs)
 
-        return snapshots
+        def snapshots():
+            for row_dict in row_dicts:
+                yield NewHorizonsLORRI._snapshot_from_row(
+                    row_dict, volumes=volumes, fov_type=fov_type,
+                    return_all_planets=return_all_planets, overrides=overrides)
+
+        return snapshots()
 
     @staticmethod
     def _volumes_directory(index_path):

@@ -39,9 +39,8 @@ described below.
   so adding, renaming or re-signing a public member means updating
   `host_new_horizons/__init__.pyi` in the same change. The `[tool.mypy] exclude`, the
   override list in `pyproject.toml` and `.stubtest-allowlist` keep it off the stub-less
-  modules. The two `type: ignore[override]` comments are real mismatches with `oops.Host`:
-  `from_file` names its first parameter `fileinfo`, and `from_index` returns
-  `list[Snapshot]`.
+  modules. The `type: ignore[override]` comment is a real mismatch with `oops.Host`:
+  `from_file` names its first parameter `fileinfo`.
 - `docs/conf.py` resolves the short class names in docstrings (`FCPath`, `Observation`,
   ...) through intersphinx with `_SHORT_NAMES`. Add a name there when a nitpicky build
   reports a class from another RMS package.
@@ -123,6 +122,10 @@ described below.
   gives clock counts with a partition, rounds the stop count differently, gives
   PRODUCT_CREATION_TIME as a date alone, and shortens some TARGET_NAMEs). `oops.Host.from_index()` reads the rows itself with the default
   validation, which compares every shared column, so it fails on these indexes.
+- `from_index()` returns an iterator. It checks its arguments and reads and filters the
+  tables itself, then returns a generator that builds each row's Snapshot when the
+  iteration reaches it, so only an error in one row waits for that row. It must not be a
+  generator function, which would defer every error to the first `next()`.
 - The camera frame `NH_LORRI` is a `Cmatrix` that flips the y and z axes of the SPICE
   frame, registered as `NH_LORRI_FLIPPED`, because the instrument kernel gives the
   boresight along -Z. `_define_camera_frame()` registers both lazily, and only when the

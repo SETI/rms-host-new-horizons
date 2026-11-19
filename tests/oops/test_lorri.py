@@ -3,6 +3,7 @@
 ##########################################################################################
 """Tests for the New Horizons LORRI host, host_new_horizons.oops.lorri."""
 
+from collections.abc import Iterator
 import json
 import pathlib
 import tempfile
@@ -627,8 +628,8 @@ def test_from_file_return_all_planets(tmp_path: pathlib.Path,
 def test_from_index_return_all_planets(fake_spicedb: FakeSpiceDB) -> None:
     """A target that is one of the planets is not listed twice."""
 
-    _ = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(TARGET_NAME='JUPITER')],
-                                    return_all_planets=True)
+    _ = list(NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(TARGET_NAME='JUPITER')],
+                                         return_all_planets=True))
     (_, kwargs) = fake_spicedb.named('used_basenames')[0]
     assert kwargs['bodies'] == ALL_PLANETS
 
@@ -1007,24 +1008,46 @@ def test_host_from_file_dispatches_to_lorri(tmp_path: pathlib.Path, suffix: str)
 
 
 def test_from_index_rows(fake_spicedb: FakeSpiceDB) -> None:
-    obs = NewHorizonsLORRI.from_index(INDEX)
+    obs = list(NewHorizonsLORRI.from_index(INDEX))
     assert len(obs) == 30
 
 
+def test_from_index_builds_each_row_when_reached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The result is an iterator that builds each row's Snapshot when it reaches the row
+    and yields the rows in index order."""
+
+    built: list[Any] = []
+    snapshot_from_row = NewHorizonsLORRI._snapshot_from_row
+
+    def spy(row_dict: dict[str, Any], **kwargs: Any) -> Any:
+        built.append(row_dict['FILE_SPECIFICATION_NAME'])
+        return snapshot_from_row(row_dict, **kwargs)
+
+    monkeypatch.setattr(NewHorizonsLORRI, '_snapshot_from_row', spy)
+    snapshots = NewHorizonsLORRI.from_index(INDEX)
+    assert isinstance(snapshots, Iterator)
+    assert built == []
+    first = next(snapshots)
+    assert len(built) == 1
+    rest = list(snapshots)
+    assert len(rest) == 29
+    assert first.basename == 'lor_0030702839_0x630_sci.fit'
+
+
 def test_from_index_uses_the_supplement_values() -> None:
-    obs = NewHorizonsLORRI.from_index(INDEX)[0]
+    obs = next(NewHorizonsLORRI.from_index(INDEX))
     assert obs.dict['SPACECRAFT_CLOCK_START_COUNT'] == '0030702838:48850'
     assert obs.dict['SPACECRAFT_CLOCK_STOP_COUNT'] == '0030702838:49000'
 
 
 def test_from_index_merges_the_supplement() -> None:
-    obs = NewHorizonsLORRI.from_index(INDEX)[0]
+    obs = next(NewHorizonsLORRI.from_index(INDEX))
     assert obs.dict['REDUCTION_LEVEL'] == 'LEVEL2'
     assert obs.dict['BINNING_MODE'] == '1x1'
 
 
 def test_from_index_with_supplement() -> None:
-    obs = NewHorizonsLORRI.from_index(INDEX, supplement=SUPPLEMENT)
+    obs = list(NewHorizonsLORRI.from_index(INDEX, supplement=SUPPLEMENT))
     assert len(obs) == 30
 
 
@@ -1198,8 +1221,8 @@ def test_from_index_refuses_no_supplement() -> None:
 
 
 def test_from_index_rows_need_no_supplement() -> None:
-    assert len(NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()],
-                                           supplement=None)) == 1
+    assert len(list(NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()],
+                                                supplement=None))) == 1
 
 
 def test_from_index_uses_a_given_label(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1225,23 +1248,27 @@ def test_from_index_rejects_an_unknown_keyword() -> None:
 
 @pytest.mark.parametrize('select', [0, slice(None), 'data'])
 def test_from_index_refuses_select(select: Any) -> None:
+    """The call itself raises, before any iteration."""
+
     with pytest.raises(oops.OopsValueError,
                        match='each row of a New Horizons LORRI index is one observation'):
         NewHorizonsLORRI.from_index(INDEX, select=select)
 
 
 def test_from_index_rejects_an_unknown_binning_mode() -> None:
+    snapshots = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(BINNING_MODE='2x2')])
     with pytest.raises(oops.host.HostFormatError,
                        match="unrecognized LORRI BINNING_MODE: '2x2'"):
-        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(BINNING_MODE='2x2')])
+        next(snapshots)
 
 
 @pytest.mark.parametrize('null', ['N/A', None])
 def test_from_index_rejects_a_missing_binning_mode(null: str | None) -> None:
+    snapshots = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(BINNING_MODE=null)])
     with pytest.raises(oops.host.HostFormatError,
                        match=r'unrecognized LORRI BINNING_MODE: missing in '
                              r'.*NHJULO_2001/'):
-        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(BINNING_MODE=null)])
+        next(snapshots)
 
 
 def test_from_file_fits_pointing_needs_no_header_epoch(tmp_path: pathlib.Path) -> None:
@@ -1356,7 +1383,7 @@ def test_from_index_dict_is_json() -> None:
 
 
 def test_from_index_dict_of_the_test_index_is_json() -> None:
-    obs = NewHorizonsLORRI.from_index(INDEX)[0]
+    obs = next(NewHorizonsLORRI.from_index(INDEX))
     assert json.loads(json.dumps(obs.dict)) == obs.dict
 
 
@@ -1366,12 +1393,16 @@ def test_from_index_dict_of_the_test_index_is_json() -> None:
 ])
 def test_from_index_row_without_a_needed_column(missing: tuple[str, ...],
                                                 column: str) -> None:
+    """The row raises when the iteration reaches it, after the row before it."""
+
     row_dict = row()
     for key in missing:
         del row_dict[key]
+    snapshots = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(), row_dict])
+    next(snapshots)
     with pytest.raises(oops.host.HostFormatError,
                        match=f'no {column} for LORRI image .*NHJULO_2001/data/'):
-        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+        next(snapshots)
 
 
 def fake_scs2e(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
@@ -1413,11 +1444,12 @@ def test_time_from_an_unreadable_clock_count(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(cspyce, 'scs2e', scs2e)
     row_dict = row()
     del row_dict['START_TIME']
+    snapshots = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
     with pytest.raises(oops.OopsSpiceError,
                        match=r'no time for the LORRI clock count 0030713585:49000 for '
                              r'.*lor_0030713591_0x633_sci\.fit: '
                              r'SPICE\(INVALIDSCLKSTRING\)'):
-        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+        next(snapshots)
 
 
 # Without a clock count, which would give the start time instead
@@ -1428,7 +1460,8 @@ def test_time_from_an_unreadable_clock_count(monkeypatch: pytest.MonkeyPatch) ->
 def test_from_index_row_with_an_invalid_value(column: str, value: str) -> None:
     row_dict = row(**{column: value})
     del row_dict['SPACECRAFT_CLOCK_START_COUNT']
+    snapshots = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
     with pytest.raises(oops.host.HostFormatError, match=f'no {column} for LORRI image'):
-        NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+        next(snapshots)
 
 ##########################################################################################
