@@ -1,6 +1,11 @@
 ##########################################################################################
 # host_new_horizons/oops/lorri.py
 ##########################################################################################
+"""The New Horizons LORRI host, which makes a Snapshot from each LORRI image.
+
+The :doc:`user guide </user_guide/user_guide>` describes the products it reads, how it
+merges the two labels of each product, and the errors it raises.
+"""
 
 import collections
 import datetime as dt
@@ -440,8 +445,9 @@ class NewHorizonsLORRI(oops.Host):
             FileNotFoundError: If the FITS file that a PDS3 label names does not exist,
                 except in an astrometry read.
             oops.OopsSpiceError: If the pointing comes from the C kernels and they give
-                none at mid-exposure (the middle of `cadence`, if it is given). Its
-                message names the time and the FITS file and ends with the SPICE error
+                none at mid-exposure (the middle of `cadence`, if it is given, moved by a
+                `timeshift` of the start/stop time). Its message gives the time and the
+                FITS file and ends with the SPICE error
                 code, such as "SPICE(NOFRAMECONNECT)". Never raised when `frame` is given
                 or `pointing` is not "spice". Also raised if no source gives the start
                 time and the spacecraft clock kernel cannot convert the clock count.

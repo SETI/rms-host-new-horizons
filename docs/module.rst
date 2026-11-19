@@ -6,6 +6,11 @@
    :members:
    :show-inheritance:
 
+``host_new_horizons.oops`` Module
+=================================
+
+.. automodule:: host_new_horizons.oops
+
 ``host_new_horizons.oops.lorri`` Module
 =======================================
 

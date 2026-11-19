@@ -1,6 +1,12 @@
 ##########################################################################################
 # host_new_horizons/__init__.py
 ##########################################################################################
+"""The New Horizons mission hosts for the OOPS observation geometry toolkit.
+
+The package exports :class:`~host_new_horizons.oops.lorri.NewHorizonsLORRI`. Importing
+``host_new_horizons`` does not import oops; the first access to the class imports
+:mod:`host_new_horizons.oops`, which registers the host with :class:`~oops.host.Host`.
+"""
 
 import importlib
 

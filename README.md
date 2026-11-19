@@ -30,29 +30,42 @@
 
 `rms-host-new-horizons` is the New Horizons mission host for
 [OOPS](https://github.com/SETI/rms-oops), the Object-Oriented Python SPICE toolkit for
-observation geometry. It turns images from the Long Range Reconnaissance Imager (LORRI)
-into OOPS `Snapshot` objects, with the frame, field of view, timing, target, and light
-source that each image requires. It is a product of the
-[PDS Ring-Moon Systems Node](https://pds-rings.seti.org).
+observation geometry. It reads images from the Long Range Reconnaissance Imager (LORRI)
+of New Horizons, as the Planetary Data System (PDS) archives them, and turns each one
+into an OOPS `Snapshot`: the image array, together with the time, field of view,
+pointing, target, and light source that OOPS needs to compute the image's geometry. It
+is a product of the [PDS Ring-Moon Systems Node](https://pds-rings.seti.org).
+
+# Features
+
+- **Either file of a product**: an image can be opened from its FITS file or from its
+  PDS3 label, and the pixels are identical either way.
+- **Metadata from both labels**: the values in the PDS3 label and in the FITS header are
+  merged under the PDS3 names, with one fixed choice for each value on which they
+  disagree.
+- **Whole volumes at once**: a PDS3 index and its supplemental index give one `Snapshot`
+  per image, without opening the images.
+- **Pointing from SPICE or from the FITS header**: the pointing comes from the New
+  Horizons C kernels, from the FITS header, or from a frame that the caller supplies.
+- **Calibration to I/F**: a calibrated image carries the factor that converts its data
+  to I/F.
 
 # Installation
 
-The `host_new_horizons` module is available via the `rms-host-new-horizons` package on
-PyPI and can be installed with:
+`rms-host-new-horizons` needs Python 3.11 or later. Install it from PyPI with:
 
 ```sh
 pip install rms-host-new-horizons
 ```
 
-Geometry calculations need the New Horizons SPICE kernels. The host selects them through
-the kernel database of `spicedb`, named by `SPICE_SQLITE_DB_NAME`, and reads them from
-the directory named by the `SPICE_PATH` environment variable (or `$OOPS_RESOURCES/SPICE`).
+The host also needs the New Horizons SPICE kernels. The
+[setup chapter](https://rms-host-new-horizons.readthedocs.io/en/latest/user_guide/user_guide_setup.html)
+of the user guide describes the kernels and the environment variables that locate them.
 
-# Getting Started
+# Quick Start
 
-Importing `host_new_horizons.oops` registers the New Horizons host with `oops.Host`,
-which can then identify and read any LORRI image, from either its FITS file or its PDS3
-label:
+Importing `host_new_horizons.oops` registers the host with `oops.Host`, which can then
+open any LORRI image:
 
 ```python
 import oops
@@ -61,9 +74,7 @@ import host_new_horizons.oops
 obs = oops.Host.from_file('NHJULO_2001/data/20070110_003071/lor_0030713591_0x633_sci.fit')
 ```
 
-The host class can also be used directly. It reads a volume index together with the
-supplemental index beside it (here `NHJULO_2001_supplemental_index.lbl`), which must
-exist:
+The host class can also be used directly, for one image or for every image in a volume:
 
 ```python
 from host_new_horizons import NewHorizonsLORRI
@@ -73,56 +84,14 @@ snapshot = NewHorizonsLORRI.from_file(
 snapshots = NewHorizonsLORRI.from_index('NHJULO_2001_index.lbl')
 ```
 
-# Features
+Replace each path with the location of the file in your copy of the archive, or with
+its URL.
 
-- `NewHorizonsLORRI.from_file()` makes a `Snapshot` from a raw or calibrated LORRI
-  image, given its FITS file or its PDS3 label. Given the FITS file, it reads only that
-  file. Given the label, it reads the label and the FITS file beside it, and takes the
-  metadata from both. Its path names the FITS file either way. The image array is the
-  one the file stores; a calibrated image also carries its error estimates and quality
-  flags. `astrometry=True` reads no image data, and given a PDS3 label it reads the label
-  alone, without the FITS file.
-- Where the label and the FITS header disagree, each value always comes from the one of
-  the two that is accurate for it. The start time, the exposure duration, and the image
-  size come from the FITS header; the label gives the start time rounded to the
-  millisecond. The target name and the spacecraft clock counts come from the label; the
-  header's target name is the data pipeline's guess, such as "FJUPITER" for Jupiter. A
-  value that neither gives is left out rather than set to None, and so are the archive's
-  null values, such as "N/A" and "UNKNOWN".
-- The target body comes from the target name by fixed translations of the label's forms
-  of names: "J17 CALLIRRHOE" gives CALLIRRHOE, "136472 MAKEMAKE" gives MAKEMAKE, and
-  "ASTEROID 486958 (2014 MU69)" gives ARROKOTH, as does the FITS header's "MU69". A name
-  that begins with "PLUTO", such as "PLUTO-CHARON", gives PLUTO, and no name or
-  "CALIBRATION" gives NONE. Any other name is used as it is, whether or not SPICE knows
-  it.
-- The spacecraft clock counts at the start and end of the exposure are spelled as the
-  PDS3 label spells them. They come from the label, or from the FITS header (its start
-  count, and its end time converted to a count) when the label is not read or gives
-  none. The metadata, the PDS3 label, and the FITS headers are published as dictionaries
-  that can be written as JSON.
-- An image whose pointing the C kernels do not cover raises `oops.OopsSpiceError`, with
-  the SPICE error code in its message. Giving a frame, or taking the pointing from the
-  FITS header, skips that check.
-- The pointing comes from the C kernels, or from the FITS header with
-  `pointing='fits'`; the spacecraft's position comes from the SP kernels, or from the
-  FITS header with `geom='fits'`. The camera distortion is modeled by a polynomial,
-  which `fov_type='flat'` replaces with an undistorted field of view.
-- A calibrated image carries an I/F calibration, built from the conversion factor its
-  FITS header gives for a solar spectrum (RSOLAR), the exposure, and the target's
-  distance from the Sun in the SPICE kernels. A raw image, an astrometry read of a label
-  alone (which reads no FITS header), an exposure of zero, an image of the Sun, an image
-  without a target the kernels can place, and an index row have none, unless the caller
-  passes `calibrations`.
-- `NewHorizonsLORRI.from_index()` makes one `Snapshot` for each row of a volume index.
-  It merges in the columns of the supplemental index, whose rows must list the same
-  products, matched on VOLUME_ID and FILE_SPECIFICATION_NAME in any order. Where both
-  tables give a column, the supplement's value is kept. Each `Snapshot` names its FITS
-  file by its full path or URL, found from where the index itself is. A value that the
-  supplement marks as missing is left out, except a zero that is a real value, such as
-  the distance of the Sun from itself in an image of the Sun.
+# Documentation
 
-Details are available in the
-[module documentation](https://rms-host-new-horizons.readthedocs.io/en/latest/module.html).
+The [documentation](https://rms-host-new-horizons.readthedocs.io) holds the user guide
+and the API reference. To build it locally, run `make html` in the `docs` directory after
+installing the package with its `docs` extra.
 
 # Contributing
 
