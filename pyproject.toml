@@ -12,10 +12,11 @@ dependencies = [
   "astropy>=6.1",           # 6.1 is the first that supports NumPy 2
   "cspyce>=2.3.2",          # 2.3.2 is the first with Python 3.13 wheels
   "numpy>=2.0",
-  "rms-filecache>=2.2.0",   # 2.2.0 is the first whose FCPath.absolute() works
+  "rms-filecache>=2.2.0",   # 2.2.0 makes FCPath.is_local() a method
   "rms-julian>=3.0.2",      # 3.0.2 drops pyparsing's deprecated camelCase API
   "rms-oops>=0.5.0",        # 0.5.0 adds oops.OopsSpiceError; also provides spicedb
-  "rms-pdsparser>=2.3.0",
+  "rms-pdsparser>=2.4.0",   # 2.4.0 is the minimum of rms-oops
+  "rms-pdstable>=1.0.1",    # 1.0.1 accepts an FCPath label path
 ]
 license = "Apache-2.0"
 authors = [
@@ -77,7 +78,7 @@ pythonpath = [
   "src"
 ]
 testpaths = ["tests"]
-addopts = ["-n", "auto", "--cov=src/host_new_horizons", "--strict-markers", "--strict-config"]
+addopts = ["--cov=src/host_new_horizons", "--strict-markers", "--strict-config"]
 markers = []
 filterwarnings = [
   "error",

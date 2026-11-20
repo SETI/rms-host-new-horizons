@@ -60,8 +60,8 @@ jobs:
           pyroma .
 
       # The two published stubs, the __init__.pyi of host_new_horizons and of
-      # host_new_horizons.oops, must keep describing the runtime API. The allowlist accepts only the deliberate
-      # absence of a stub for the internal lorri module.
+      # host_new_horizons.oops, must keep describing the runtime API. The allowlist
+      # accepts only the deliberate absence of a stub for the internal lorri module.
       - name: Stubtest
         run: |
           python -m mypy.stubtest host_new_horizons --mypy-config-file pyproject.toml --allowlist .stubtest-allowlist
@@ -110,7 +110,7 @@ jobs:
       # The tests need no SPICE kernels or data files; see tests/oops/conftest.py.
       - name: Test with coverage
         run: |
-          python -m pytest --cov-report=xml
+          python -m pytest -n 4 --cov-report=xml
 
       - name: Print coverage report
         run: |
