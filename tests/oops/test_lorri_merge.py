@@ -12,7 +12,7 @@ import julian
 import oops
 import pytest
 from astropy.io import fits
-from conftest import FITS_HEADER, write_fits, write_label
+from conftest import FITS_HEADER, cache_file, write_fits, write_label
 from filecache import FCPath
 from pdsparser import Pds3Label
 
@@ -189,13 +189,27 @@ def test_dict_start_time_is_an_iso_string(tmp_path: pathlib.Path) -> None:
     assert from_label(tmp_path).dict['START_TIME'] == '2007-01-10T05:41:08.363'
 
 
-def test_label_astrometry_on_a_remote_label_names_no_local_file(
-        tmp_path: pathlib.Path) -> None:
+def remote_label(tmp_path: pathlib.Path) -> Pds3Label:
+    """A parsed synthetic label that claims to come from a remote volume."""
+
     label = Pds3Label(write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT'))
     label.filepath = FCPath('https://example.org/volume/lor_test.lbl')
-    obs = NewHorizonsLORRI.from_file(label, astrometry=True)
+    return label
+
+
+def test_label_astrometry_on_a_remote_label_names_no_local_file(
+        tmp_path: pathlib.Path) -> None:
+    obs = NewHorizonsLORRI.from_file(remote_label(tmp_path), astrometry=True)
     assert 'abspath' not in obs.subfields
     assert obs.image_url == 'https://example.org/volume/lor_test.fit'
+
+
+# An earlier read put the FITS file in the local cache
+def test_label_astrometry_on_a_remote_label_names_the_cached_file(
+        tmp_path: pathlib.Path) -> None:
+    cached = cache_file('https://example.org/volume/lor_test.fit')
+    obs = NewHorizonsLORRI.from_file(remote_label(tmp_path), astrometry=True)
+    assert obs.abspath == cached.resolve()
 
 
 def test_parsed_label_of_another_instrument(tmp_path: pathlib.Path) -> None:
@@ -205,18 +219,44 @@ def test_parsed_label_of_another_instrument(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_file(label)
 
 
-def test_parsed_label_without_a_file(tmp_path: pathlib.Path) -> None:
-    text = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT').read_text()
-    label = Pds3Label(text)
-    with pytest.raises(oops.host.HostFormatError, match='Pds3Label without a file path'):
-        NewHorizonsLORRI.from_file(label, astrometry=True)
+PATH_SUBFIELDS = {'filepath', 'basename', 'abspath', 'image_url'}
+
+
+def label_without_a_file(tmp_path: pathlib.Path) -> Pds3Label:
+    """A synthetic label parsed from its text, so that it has no file path."""
+
+    return Pds3Label(write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT').read_text())
+
+
+def test_astrometry_of_a_label_without_a_file(tmp_path: pathlib.Path) -> None:
+    obs = NewHorizonsLORRI.from_file(label_without_a_file(tmp_path), astrometry=True)
+    assert PATH_SUBFIELDS & set(obs.subfields) == set()
+
+
+def test_full_read_of_a_label_without_a_file(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(oops.host.HostFormatError,
+                       match='no file path is known for this Pds3Label, so its FITS '
+                             'file cannot be found'):
+        NewHorizonsLORRI.from_file(label_without_a_file(tmp_path))
+
+
+def hdulist_without_a_file(tmp_path: pathlib.Path) -> fits.HDUList:
+    """A synthetic FITS file copied into memory, so that it has no file name."""
+
+    with fits.open(write_fits(tmp_path / 'lor_test.fit')) as hdulist:
+        return fits.HDUList([hdu.copy() for hdu in hdulist])
 
 
 def test_hdulist_without_a_file(tmp_path: pathlib.Path) -> None:
-    with fits.open(write_fits(tmp_path / 'lor_test.fit')) as hdulist:
-        in_memory = fits.HDUList([hdu.copy() for hdu in hdulist])
-    with pytest.raises(oops.host.HostFormatError, match='HDUList without a file name'):
-        NewHorizonsLORRI.from_file(in_memory)
+    obs = NewHorizonsLORRI.from_file(hdulist_without_a_file(tmp_path))
+    assert PATH_SUBFIELDS & set(obs.subfields) == set()
+
+
+# The clock count, not a file name, makes the IDs of the header's frame and path unique
+def test_hdulist_without_a_file_names_its_fits_frame_by_its_clock_count(
+        tmp_path: pathlib.Path) -> None:
+    obs = NewHorizonsLORRI.from_file(hdulist_without_a_file(tmp_path), pointing='fits')
+    assert obs.frame.frame_id == '.NH_FRAME_' + FITS_HEADER['SPCSCLK0']
 
 
 def test_fits_file_without_image_lines(tmp_path: pathlib.Path) -> None:
@@ -580,13 +620,32 @@ def test_pointing_is_not_checked_with_a_cmatrix(tmp_path: pathlib.Path,
     assert obs.frame.frame_id == frame.frame_id
 
 
-def test_from_index_never_checks_pointing(monkeypatch: pytest.MonkeyPatch) -> None:
-    no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT)')
+def row_without_pointing(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The Snapshot of an index row whose pointing the C kernels cannot supply."""
+
+    no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT) -- sxform -- insufficient data')
     row = {'VOLUME_ID': 'NHJULO_2001', 'FILE_SPECIFICATION_NAME': 'data/lor_test.lbl',
            'START_TIME': '2007-01-10T05:41:08.363', 'EXPOSURE_DURATION': 5.,
            'BINNING_MODE': '1x1'}
-    (obs,) = NewHorizonsLORRI.from_index('index.lbl', row_dicts=[row])
-    assert obs.basename == 'lor_test.fit'
+    (obs,) = NewHorizonsLORRI.from_index(tmp_path / 'NHJULO_2001_index.lbl',
+                                         row_dicts=[row])
+    return obs
+
+
+def test_from_index_keeps_a_row_without_pointing(tmp_path: pathlib.Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    assert row_without_pointing(tmp_path, monkeypatch).basename == 'lor_test.fit'
+
+
+# The row's start, 2007-01-10T05:41:08.363 UTC, is when its frame is evaluated here
+def test_frame_of_a_row_without_pointing_raises_oops_spice_error(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    obs = row_without_pointing(tmp_path, monkeypatch)
+    with pytest.raises(oops.OopsSpiceError,
+                       match=r'^no New Horizons LORRI pointing at '
+                             r'2007-01-10T05:41:08\.363 for .*NHJULO_2001/data/'
+                             r'lor_test\.fit: SPICE\(NOFRAMECONNECT\)$'):
+        obs.frame.transform_at_time(obs.time[0])
 
 
 @pytest.mark.parametrize(('options', 'expected'), [

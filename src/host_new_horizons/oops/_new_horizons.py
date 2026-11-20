@@ -55,8 +55,10 @@ class _NewHorizons:
                 None to ignore.
             meta (str, optional): The name of a metakernel to furnish instead of the
                 kernels selected from the database.
-            planets (list, optional): A list of planets to pass to
-                :meth:`~oops.Body.define_solar_system`. None or 0 means all.
+            planets (int | collections.abc.Sequence[int], optional): The planet number,
+                1 to 9, or a sequence of planet numbers, such as (5, 9) for Jupiter and
+                Pluto, whose bodies :meth:`~oops.Body.define_solar_system` defines with
+                their moons. None or 0 means all nine.
             irregulars (bool, optional): True to include the irregular satellites; False
                 otherwise.
         """

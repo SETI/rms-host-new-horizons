@@ -15,8 +15,8 @@ import numpy as np
 import oops
 import pytest
 from astropy.io import fits
-from conftest import (FITS_HEADER, TEST_FILES, FakeSpice, FakeSpiceDB, write_fits,
-                      write_label)
+from conftest import (FITS_HEADER, TEST_FILES, FakeSpice, FakeSpiceDB, cache_file,
+                      write_fits, write_label)
 from filecache import FCPath
 from pdsparser import Pds3Label
 
@@ -291,6 +291,22 @@ def test_from_file_rejects_an_invalid_option(tmp_path: pathlib.Path, option: str
     options: dict[str, Any] = {option: value}
     with pytest.raises(oops.OopsValueError, match=f'invalid {option} {value!r}; use one'):
         load(tmp_path, **options)
+
+
+# The arguments are checked before the file is opened, so the file need not exist
+@pytest.mark.parametrize('select', [0, slice(None), 'data'])
+def test_from_file_refuses_select(tmp_path: pathlib.Path, select: Any) -> None:
+    with pytest.raises(oops.OopsValueError,
+                       match=r'each New Horizons LORRI file is one observation; select '
+                             r'must be None, not '):
+        NewHorizonsLORRI.from_file(tmp_path / 'missing.fit', select=select)
+
+
+def test_from_file_rejects_an_unknown_keyword(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(oops.OopsTypeError,
+                       match=r"unexpected keyword argument for "
+                             r"NewHorizonsLORRI\.from_file: 'calibration'"):
+        NewHorizonsLORRI.from_file(tmp_path / 'missing.fit', calibration=[])
 
 
 def test_from_file_data(tmp_path: pathlib.Path) -> None:
@@ -1148,6 +1164,13 @@ def test_from_index_filter() -> None:
     assert {o.binning_mode for o in obs} == {'4X4'}
 
 
+def test_from_index_rejects_an_unknown_filter_column() -> None:
+    """The call itself raises, before any iteration."""
+
+    with pytest.raises(oops.OopsValueError, match='NOPE'):
+        NewHorizonsLORRI.from_index(INDEX, filter={'NOPE': 1})
+
+
 def test_from_index_rejects_an_invalid_fov_type() -> None:
     with pytest.raises(oops.OopsValueError, match="invalid fov_type 'wide'"):
         NewHorizonsLORRI.from_index(INDEX, fov_type='wide')
@@ -1197,26 +1220,67 @@ def test_from_index_filepath_names_the_fits_file(spec: str, filepath: str) -> No
 def test_from_index_names_the_fits_file_in_full() -> None:
     (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()])
     image = TEST_FILES / 'NHJULO_2001/data/20070110_003071/lor_0030713591_0x633_sci.fit'
-    assert (obs.image_url, obs.abspath) == (image.as_posix(), image.resolve())
+    assert obs.image_url == image.as_posix()
 
 
-# Treated as remote, the FITS file is not in the cache, since an index read fetches none
-def test_from_index_remote_image_has_no_abspath(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(FCPath, 'is_local', lambda self: False)
-    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()])
+# The FITS file of row() and an index in a metadata tree, relative to the holdings
+ROW_IMAGE = ('volumes/NHxxLO_xxxx/NHJULO_2001/data/20070110_003071/'
+             'lor_0030713591_0x633_sci.fit')
+ROW_INDEX = 'metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl'
+
+
+def test_from_index_local_image_has_abspath(tmp_path: pathlib.Path) -> None:
+    image = tmp_path / ROW_IMAGE
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b'')
+    (obs,) = NewHorizonsLORRI.from_index(tmp_path / ROW_INDEX, row_dicts=[row()])
+    assert obs.abspath == image.resolve()
+
+
+def test_from_index_missing_local_image_has_no_abspath(tmp_path: pathlib.Path) -> None:
+    (obs,) = NewHorizonsLORRI.from_index(tmp_path / ROW_INDEX, row_dicts=[row()])
     assert 'abspath' not in obs.subfields
 
 
+def test_from_index_creates_no_directories(tmp_path: pathlib.Path) -> None:
+    holdings = tmp_path / 'holdings'
+    (holdings / ROW_INDEX).parent.mkdir(parents=True)
+    list(NewHorizonsLORRI.from_index(holdings / ROW_INDEX, row_dicts=[row()]))
+    assert not (holdings / 'volumes').exists()
+
+
+# An index read fetches no FITS file, so only an earlier read can have cached it
+def test_from_index_remote_image_has_no_abspath() -> None:
+    (obs,) = NewHorizonsLORRI.from_index('https://h.org/' + ROW_INDEX, row_dicts=[row()])
+    assert 'abspath' not in obs.subfields
+
+
+def test_from_index_remote_image_in_the_cache_has_abspath() -> None:
+    cached = cache_file('https://h.org/' + ROW_IMAGE)
+    (obs,) = NewHorizonsLORRI.from_index('https://h.org/' + ROW_INDEX, row_dicts=[row()])
+    assert obs.abspath == cached.resolve()
+
+
 @pytest.mark.parametrize(('index', 'volumes'), [
-    ('/h/volumes/NHxxLO_xxxx/NHJULO_2001/index/index.lbl', '/h/volumes/NHxxLO_xxxx'),
     ('/h/metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl',
      '/h/volumes/NHxxLO_xxxx'),
     ('https://h.org/metadata/NHxxLO_xxxx/NHxxLO_1999/NHxxLO_1999_index.lbl',
      'https://h.org/volumes/NHxxLO_xxxx'),
     ('/h/NHJULO_2001_index.lbl', '/h'),
-], ids=['volume-index', 'metadata', 'cumulative-url', 'other'])
+], ids=['metadata', 'cumulative-url', 'other'])
 def test_volumes_directory(index: str, volumes: str) -> None:
     assert str(NewHorizonsLORRI._volumes_directory(index)) == volumes
+
+
+# A volume's own index lives in its INDEX directory, in either case
+@pytest.mark.parametrize('index', ['/h/volumes/NHxxLO_xxxx/NHK2LO_1001/index/index.lbl',
+                                   '/h/NHK2LO_1001/INDEX/INDEX.LBL'])
+def test_from_index_refuses_a_volume_index(index: str) -> None:
+    with pytest.raises(oops.host.HostIndexError,
+                       match=r'New Horizons LORRI reads the Ring-Moon Systems Node '
+                             r'metadata index, such as "NHJULO_2001_index\.lbl", not a '
+                             r"volume's own index: .*(index|INDEX)\.(lbl|LBL)$"):
+        NewHorizonsLORRI.from_index(index, row_dicts=[row()])
 
 
 # The supplement is required, so None is refused rather than taken as "search for it"
@@ -1435,6 +1499,7 @@ def test_from_index_row_time_from_the_clock_count(
     (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
     assert calls == [(-98, '0030713585:49000')]
     assert obs.time == (1000. + 30713585., 1000. + 30713590.)
+    assert obs.time_from_sclk is True
 
 
 def test_from_file_time_from_the_clock_count(tmp_path: pathlib.Path,
@@ -1442,6 +1507,16 @@ def test_from_file_time_from_the_clock_count(tmp_path: pathlib.Path,
     fake_scs2e(monkeypatch)
     obs = load(tmp_path, fits_keywords={'SPCSCET': None})
     assert obs.time[0] == 1000. + 30713585.
+    assert obs.time_from_sclk is True
+
+
+def test_from_file_time_from_the_header(tmp_path: pathlib.Path) -> None:
+    assert load(tmp_path).time_from_sclk is False
+
+
+def test_from_index_row_time_from_its_start_time() -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()])
+    assert obs.time_from_sclk is False
 
 
 def test_time_from_an_unreadable_clock_count(monkeypatch: pytest.MonkeyPatch) -> None:

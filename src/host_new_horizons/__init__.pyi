@@ -15,7 +15,7 @@ The detectors and support methods that a Host subclass overrides or calls, such 
 """
 
 import pathlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any
 
 from astropy.io.fits import HDUList
@@ -42,13 +42,17 @@ class NewHorizonsLORRI(Host):
     # an astrometry read of a PDS3 label raises oops.OopsValueError. An image with no
     # C-kernel pointing raises oops.OopsSpiceError, whose message ends with the SPICE
     # error code, such as "SPICE(NOFRAMECONNECT)"; never when `frame` is given or
-    # `pointing` is not "spice". from_index never checks the pointing.
+    # `pointing` is not "spice". A select other than None raises oops.OopsValueError, and
+    # any keyword not listed raises oops.OopsTypeError. from_index checks the pointing of
+    # each row only to give a row without it a frame that raises oops.OopsSpiceError when
+    # it is evaluated.
     @staticmethod
     def from_file(  # type: ignore[override]
         fileinfo: str | pathlib.Path | FCPath | Pds3Label | HDUList, *,
         geom: str = 'spice', pointing: str = 'spice', fov_type: str = 'fast',
         return_all_planets: bool = False,
         pds3_options: dict[str, Any] | None = None, astrometry: bool = False,
+        select: int | slice | str | tuple[int | slice | str, ...] | None = None,
         target: str | Body | None = None, lightsource: LightSource | None = None,
         path: str | Path | None = None, frame: str | Frame | None = None,
         cadence: Cadence | None = None, fov: FOV | None = None,
@@ -59,7 +63,8 @@ class NewHorizonsLORRI(Host):
     # Every row is one Snapshot. supplement=None without row_dicts raises
     # oops.host.HostIndexError, a select other than None raises oops.OopsValueError, and
     # any keyword not listed raises oops.OopsTypeError. The iterator builds each row's
-    # Snapshot when it reaches the row.
+    # Snapshot when it reaches the row. An index in a volume's own INDEX directory raises
+    # oops.host.HostIndexError.
     @staticmethod
     def from_index(
         filepath: str | pathlib.Path | FCPath, *,
@@ -79,6 +84,7 @@ class NewHorizonsLORRI(Host):
         parallel: Observation | None = None, **kwargs: Any) -> Iterator[Snapshot]: ...
     @staticmethod
     def initialize(*, asof: str | None = None, meta: str | None = None,
-        planets: list[Any] | None = None, irregulars: bool = True) -> None: ...
+        planets: int | Sequence[int] | None = None,
+        irregulars: bool = True) -> None: ...
 
 ##########################################################################################

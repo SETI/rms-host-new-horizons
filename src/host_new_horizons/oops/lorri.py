@@ -35,6 +35,9 @@ _SPICE_TO_FRAME = oops.Matrix3([[1, 0, 0],
                                 [0,-1, 0],
                                 [0, 0,-1]])
 
+# What OopsSpiceError reports when the C kernels give no pointing of the camera
+_NO_POINTING = 'no New Horizons LORRI pointing'
+
 # The name of the full-resolution detector in the instrument kernel
 _IK_NAME = 'NH_LORRI_1X1'
 
@@ -118,10 +121,19 @@ _SCLK_TICKS = 50000
 # order at row 1924. The other columns the two tables share are written differently: the
 # index gives each clock count with its partition, as in "1/0030598438:48850", rounds the
 # stop count differently from the label, gives PRODUCT_CREATION_TIME as a date without a
-# time, and shortens some target names, as in "50000 QUAOAR (2002 LM)", whereas the
-# supplement copies the label. So only these columns are compared, and the supplement's
-# value of a shared column is kept.
+# time, and shortens some target names, as in "50000 QUAOAR (2002 LM)", where the
+# supplement gives the label's value. So only these columns are compared, and the
+# supplement's value of a shared column is kept. The supplement still differs
+# from the labels elsewhere: it rounds EXPOSURE_DURATION to the millisecond (F7.3, 0.501
+# where the label gives 0.5006), leaves out the "12150:" prefix of some SEQUENCE_IDs,
+# and, as the index does, names five moons of Jupiter without the "J<n> " in front ("IO"
+# for "J1 IO").
 _INDEX_KEYS = ('VOLUME_ID', 'FILE_SPECIFICATION_NAME')
+
+# The name, in any case, of the directory of a volume that holds the volume's own index.
+# That index names each product by PATH_NAME and FILE_NAME and has no supplement, so the
+# host reads only the Ring-Moon Systems Node metadata index, which carries one.
+_VOLUME_INDEX_DIRECTORY = 'INDEX'
 
 # The null constants that the label of a supplement declares are not all null values.
 # The table reader masks a value equal to its column's constant. A masked -999 (angles)
@@ -198,7 +210,8 @@ _WINNING_SOURCE = {
     # clock kernel to 0.0001 ms; the label's START_TIME is that time rounded to the
     # millisecond, from 0.5 ms early to 0.5 ms late on every product. On frames taken
     # while the spacecraft spun, in cruise as well as at launch, the rounding moves the
-    # pointing at mid-exposure by as much as 37 pixels (#13).
+    # pointing at mid-exposure by as much as 48.7 pixels (lor_0055952951_0x630_eng,
+    # #13).
     'START_TIME': 'header',
 
     # EXPOSURE_DURATION: the header's. Both are accurate, matching the difference of the
@@ -282,9 +295,9 @@ class NewHorizonsLORRI(oops.Host):
     @staticmethod
     def from_file(fileinfo, *, geom='spice', pointing='spice', fov_type='fast',
                   return_all_planets=False, pds3_options=None, astrometry=False,
-                  target=None, lightsource=None, path=None, frame=None, cadence=None,
-                  fov=None, calibrations=None, timeshift=None, navigation=None,
-                  tracker=None, parallel=None, **kwargs):
+                  select=None, target=None, lightsource=None, path=None, frame=None,
+                  cadence=None, fov=None, calibrations=None, timeshift=None,
+                  navigation=None, tracker=None, parallel=None, **kwargs):
         """A Snapshot object based on a given New Horizons LORRI image file.
 
         What is read depends on the input:
@@ -335,7 +348,9 @@ class NewHorizonsLORRI(oops.Host):
                 FITS file or its PDS3 label, or its parsed content as a Pds3Label or an
                 HDUList, which is read as the label or the FITS file would be. The FITS
                 file is closed once it has been read, including an HDUList that was
-                passed in.
+                passed in. Parsed content that was not read from a file has no path
+                subfields; a Pds3Label of that kind can be read only with `astrometry`,
+                since the FITS file beside it cannot be found.
             geom (str, optional): "spice" to take the spacecraft's position from the SP
                 kernels; "fits" to take it from the FITS header, as a linear path relative
                 to the Sun.
@@ -360,6 +375,8 @@ class NewHorizonsLORRI(oops.Host):
                 True to specify that the returned Observations will only be used for
                 timing and astrometry. In this case, no data arrays are read and returned
                 in the Observation, and a PDS3 label is read without its FITS file.
+            select (None): Must be None. Each file holds a single observation, so there
+                is nothing to select from; any other value raises an error.
             target (str | oops.Body, optional): Override for the default target Body of
                 the observation. Use "NONE" for inertial pointing, indicating that no
                 Solar System body was tracked.
@@ -394,15 +411,22 @@ class NewHorizonsLORRI(oops.Host):
                 time, different frame and FOV) relative to which this Observation has a
                 fixed offset. Note that no more than one of `parallel` and `tracker` can
                 be specified.
-            **kwargs: Additional keyword arguments; they are accepted and ignored. This
-                includes `select` and `calibration`. The data array is always the image
-                as the file stores it.
+            **kwargs: Any other keyword argument raises an error.
 
         Returns:
             Snapshot: The observation, with subfields `dict`, `host`, `instrument`,
-            `binning_mode`, `spice_kernels`, `filepath`, `basename`, `spice_to_frame`,
+            `binning_mode`, `time_from_sclk`, `spice_kernels`, `spice_to_frame`,
             `spice_frame_name` and `spice_frame_id` inserted, and these where they apply:
 
+            - `filepath`, `basename` and `image_url`: the FITS file, as a path or URL,
+              even when a label was given; absent for parsed content that was not read
+              from a file.
+            - `abspath`: the FITS file's local path, if the file is local or in the
+              local cache. After an astrometry read of a remote label, which fetches no
+              FITS file, it is absent unless an earlier read put the file in the cache.
+            - `time_from_sclk`: True if no source gives the start time, so that it comes
+              from SPACECRAFT_CLOCK_START_COUNT through the spacecraft clock kernel;
+              False otherwise.
             - `label_target`: the target name as the labels give it, TARGET_NAME as
               merged: the detached label's where it gives one, otherwise the FITS
               header's SPCCBTNM. Absent where neither gives one.
@@ -436,9 +460,6 @@ class NewHorizonsLORRI(oops.Host):
               columns beyond the field of view, unless `astrometry` is True.
             - `error` and `quality`: the error estimates and quality flags of a
               calibrated product, unless `astrometry` is True; absent for a raw product.
-            - `abspath` and `image_url`, unless `astrometry` is True and the label is
-              remote, so that the FITS file was never fetched, and the file is not
-              already in the local cache (`image_url` is then still given).
 
             `dict` holds the merged items under their PDS3 names, START_TIME as an ISO
             string to the millisecond, and every other key of each source read under its
@@ -447,8 +468,7 @@ class NewHorizonsLORRI(oops.Host):
             missing. A key of the label whose value is a list with missing elements
             among others, which is a vector, keeps the list with None for each missing
             element. Every value in `dict`, `label_dict`, `header_dict` and `headers`
-            can be written as JSON. `filepath` and the other path subfields name the
-            FITS file even when a label was given.
+            can be written as JSON.
 
         Raises:
             FileNotFoundError: If the FITS file that a PDS3 label names does not exist,
@@ -456,17 +476,20 @@ class NewHorizonsLORRI(oops.Host):
             oops.OopsSpiceError: If the pointing comes from the C kernels and they give
                 none at mid-exposure (the middle of `cadence`, if it is given, moved by a
                 `timeshift` of the start/stop time). Its message gives the time and the
-                FITS file and ends with the SPICE error
-                code, such as "SPICE(NOFRAMECONNECT)". Never raised when `frame` is given
-                or `pointing` is not "spice". Also raised if no source gives the start
-                time and the spacecraft clock kernel cannot convert the clock count.
+                FITS file and ends with the SPICE error code, such as
+                "SPICE(NOFRAMECONNECT)". Never raised when `frame` is given or `pointing`
+                is not "spice". Also raised if no source gives the start time and the
+                spacecraft clock kernel cannot convert the clock count.
+            oops.OopsTypeError: If a keyword argument is not one of those listed.
             oops.OopsValueError: If `geom`, `pointing` or `fov_type` is not one of the
-                values listed above, or if `geom` or `pointing` is not "spice" in an
-                astrometry read of a PDS3 label, which reads no FITS header.
+                values listed above, if `select` is not None, if `geom` or `pointing` is
+                not "spice" in an astrometry read of a PDS3 label, which reads no FITS
+                header, or if an option in `pds3_options` is not one the parser accepts.
             oops.host.HostFormatError: If the image is not 1024 or 256 lines, if the
-                FITS file is not valid FITS, if a Pds3Label or an HDUList passed in was
-                not read from a file, or if no source read gives the exposure duration,
-                the lines of the image, or the start time or the clock count.
+                FITS file is not valid FITS, if a Pds3Label passed in was not read from a
+                file and `astrometry` is False, so that no file path is known for its
+                FITS file, or if no source read gives the exposure duration, the lines of
+                the image, or the start time or the clock count.
             oops.host.PdsHostError: If no method of the PDS3 label parser can read the
                 label, or if the label names no FITS file.
             oops.host.WrongHostError: If `fileinfo` is not a New Horizons LORRI PDS3 label
@@ -474,6 +497,8 @@ class NewHorizonsLORRI(oops.Host):
             OSError: If the file cannot be read.
         """
 
+        NewHorizonsLORRI._check_arguments('from_file', select, kwargs,
+                                          unit='New Horizons LORRI file')
         NewHorizonsLORRI._check_option('geom', geom, _GEOMS)
         NewHorizonsLORRI._check_option('pointing', pointing, _POINTINGS)
         NewHorizonsLORRI._check_option('fov_type', fov_type, _FOV_TYPES)
@@ -519,38 +544,37 @@ class NewHorizonsLORRI(oops.Host):
             'parallel'    : parallel,
         }
 
+        # The path subfields name the FITS file. Parsed content that was not read from a
+        # file has none, and a full read of such a label cannot find its FITS file.
         label = None
         hdulist = None
         if isinstance(parsed, Pds3Label):
             label = parsed
-            # The path subfields name the FITS file beside the label, so a label must
-            # come from a file
-            if label.filepath is None:
-                raise oops.host.HostFormatError('a Pds3Label without a file path cannot '
-                                                'name its image')
             if astrometry:
                 # An astrometry read of a label reads the label alone
                 if geom != 'spice' or pointing != 'spice':
                     raise oops.OopsValueError('geom and pointing from the FITS header '
                                               'need the FITS file; an astrometry read of '
                                               'a PDS3 label reads only the label')
-                filepath = NewHorizonsLORRI._fits_path(label, check=False)
+                if label.filepath is not None:
+                    filepath = NewHorizonsLORRI._fits_path(label, check=False)
+            elif label.filepath is None:
+                raise oops.host.HostFormatError('no file path is known for this '
+                                                'Pds3Label, so its FITS file cannot be '
+                                                'found')
             else:
                 filepath = NewHorizonsLORRI._fits_path(label)
                 hdulist = NewHorizonsLORRI._open_fits(filepath)
         else:
             hdulist = parsed
             if filepath is None:
-                # The path subfields name the file, so an HDUList must come from one
-                if hdulist.filename() is None:
-                    hdulist.close()
-                    raise oops.host.HostFormatError('an HDUList without a file name '
-                                                    'cannot name its image')
-                filepath = FCPath(hdulist.filename())
+                if hdulist.filename() is not None:
+                    filepath = FCPath(hdulist.filename())
                 if not NewHorizonsLORRI._detect_in_fits(hdulist):
                     hdulist.close()
+                    name = repr(hdulist) if filepath is None else filepath
                     raise oops.host.WrongHostError(f'not a {NewHorizonsLORRI.NAME} '
-                                                   f'FITS file: {filepath}')
+                                                   f'FITS file: {name}')
 
         # Everything needed is copied out of the file, which is then closed, including
         # an HDUList that oops.Host.from_file() or the caller opened
@@ -591,10 +615,12 @@ class NewHorizonsLORRI(oops.Host):
                 files as the index's: they are paired by position where the two tables
                 list the files in the same order, and otherwise by VOLUME_ID and
                 FILE_SPECIFICATION_NAME. Where both tables give a column, the
-                supplement's value is kept, because the supplement is spelled as the
-                product labels are. The default, `oops.Host.SUPPLEMENT`, reads the file
-                in the directory of `filepath` whose name matches except that "_index"
-                is replaced by "_supplemental_index" in upper or lower case.
+                supplement's value is kept, because it is closer to the product label:
+                the index gives each clock count with its partition, rounds the stop
+                count differently, gives PRODUCT_CREATION_TIME as a date alone, and
+                shortens some target names. The default, `oops.Host.SUPPLEMENT`, reads
+                the file in the directory of `filepath` whose name matches except that
+                "_index" is replaced by "_supplemental_index" in upper or lower case.
             label (Pds3Label, optional): The PDS label of `filepath` if it has already
                 been read.
             row_dicts (list[dict[str, Any]], optional): A list of dictionaries, one per
@@ -606,7 +632,7 @@ class NewHorizonsLORRI(oops.Host):
                 their values or a set or tuple of values. If provided, only rows of the
                 index in which each named column equals the value, falls in the set of
                 values, or falls in a range defined by a tuple of two values, will be
-                included.
+                included. A row without a named column is left out.
             fov_type (str, optional): "fast", "slow" or "flat", as for :meth:`from_file`.
             return_all_planets (bool, optional): Include in `spice_kernels` the kernels
                 of every planet and of Pluto, as for :meth:`from_file`.
@@ -651,13 +677,15 @@ class NewHorizonsLORRI(oops.Host):
         Returns:
             collections.abc.Iterator[Snapshot]: One observation per filtered row of the
             index, in the index's order, each with subfields `dict`, `host`,
-            `instrument`, `binning_mode`, `spice_kernels`, `filepath`, `basename`,
-            `image_url`, `spice_to_frame`, `spice_frame_name` and `spice_frame_id`
-            inserted, `abspath` if the FITS file is local or already in the local cache,
-            and `label_target`, `spacecraft_clock_start_count` and
+            `instrument`, `binning_mode`, `time_from_sclk`, `spice_kernels`, `filepath`,
+            `basename`, `image_url`, `spice_to_frame`, `spice_frame_name` and
+            `spice_frame_id` inserted, `abspath` if the FITS file is local or already in
+            the local cache, and `label_target`, `spacecraft_clock_start_count` and
             `spacecraft_clock_stop_count` where the row gives TARGET_NAME and the clock
             counts with values that do not count as missing, as for :meth:`from_file`.
-            The calibrations are empty, because a row gives no RSOLAR.
+            The calibrations are empty, because a row gives no RSOLAR. The iteration
+            stops at the first row that raises an error; `filter` can leave such a row
+            out.
 
             `dict` is the row, merged with its row of the supplement,
             without the masks of the table reader or NumPy types, so that it can be
@@ -670,16 +698,23 @@ class NewHorizonsLORRI(oops.Host):
             vectors, which are left out where all of their components are zero; and of
             the other distances, which are left out. The start of the exposure is
             START_TIME, or, if the row gives none, SPACECRAFT_CLOCK_START_COUNT
-            converted by the spacecraft clock kernel. The target body comes from the
-            row's TARGET_NAME as for :meth:`from_file`. The C kernels are not checked
-            for pointing, so a row without it still gives an observation.
+            converted by the spacecraft clock kernel, and `time_from_sclk` says which.
+            The exposure is the supplement's EXPOSURE_DURATION, which is rounded to the
+            millisecond. The target body comes from the row's TARGET_NAME as for
+            :meth:`from_file`. The supplement gives the names of five moons of Jupiter
+            without the "J<n> " that their product labels put in front ("IO" for "J1
+            IO"), so `label_target` is the supplement's name, while the target body is
+            the same as the label's. The C kernels are consulted at each row's midtime
+            but nothing is raised there: a row without pointing still gives an
+            observation, and its frame raises `oops.OopsSpiceError` when it is
+            evaluated.
             `filepath`, `basename`, `image_url`, and `abspath` name the FITS file, as a
             full path or URL: the row's FILE_SPECIFICATION_NAME, with the label's
             suffix replaced by the FITS file's in the same case, in the volume directory
             named by its VOLUME_ID. The volume directories are found from the location
-            of `filepath`: beside the volume that holds an index in its INDEX directory;
-            under "volumes" in place of "metadata" for an index in an RMS Node metadata
-            tree (".../metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl"); and
+            of `filepath`: under "volumes" in place of "metadata" for an index in an RMS
+            Node metadata tree
+            (".../metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl"), and
             otherwise in the index's own directory.
 
         Raises:
@@ -687,33 +722,41 @@ class NewHorizonsLORRI(oops.Host):
             oops.OopsSpiceError: If a row gives no START_TIME and the spacecraft clock
                 kernel cannot convert its SPACECRAFT_CLOCK_START_COUNT; raised when the
                 iteration reaches that row.
-            oops.OopsTypeError: If a keyword argument is not one of those listed.
-            oops.OopsValueError: If `fov_type` is not "fast", "slow" or "flat", or if
-                `select` is not None.
+            oops.OopsTypeError: If a keyword argument is not one of those listed, or if a
+                range in `filter` cannot be compared with its column's values.
+            oops.OopsValueError: If `fov_type` is not "fast", "slow" or "flat", if
+                `select` is not None, if `filter` names a column that no row has, or if a
+                value in `pds3_options` is invalid.
             oops.host.HostFormatError: If a row's BINNING_MODE is missing or not "1X1"
                 or "4X4" in either case, or if a row gives no EXPOSURE_DURATION, or
                 neither START_TIME nor SPACECRAFT_CLOCK_START_COUNT; raised when the
                 iteration reaches that row.
-            oops.host.HostIndexError: If `supplement` is None while `row_dicts` is not
-                given; if an index row has no supplement row or a supplement row belongs
-                to no index row; if, where the two tables list the files in different
-                orders, either lists a file twice; or if `supplement` is
-                `oops.Host.SUPPLEMENT` and the name of `filepath` contains no "_index".
+            oops.host.HostIndexError: If `filepath` is in a volume's own INDEX
+                directory, whose index is not supported; if `supplement` is None while
+                `row_dicts` is not given; if an index row has no supplement row or a
+                supplement row belongs to no index row; if, where the two tables list the
+                files in different orders, either lists a file twice; if `supplement` is
+                `oops.Host.SUPPLEMENT` and the name of `filepath` contains no "_index";
+                or if either table cannot be read as an index table.
+            oops.host.PdsHostError: If the PDS label of `filepath` or `supplement` cannot
+                be parsed.
             oops.host.WrongHostError: If `filepath` is not a New Horizons LORRI index.
             OSError: If `filepath`, or a `supplement` that is specified, does not exist or
                 cannot be read.
         """
 
-        # A mistaken keyword, such as "supplementary", must not be dropped silently
-        if kwargs:
-            raise oops.OopsTypeError(f'unexpected keyword argument for '
-                                     f'NewHorizonsLORRI.from_index: '
-                                     f'{next(iter(kwargs))!r}')
-        if select is not None:
-            raise oops.OopsValueError(f'each row of a New Horizons LORRI index is one '
-                                      f'observation; select must be None, not '
-                                      f'{select!r}')
+        NewHorizonsLORRI._check_arguments('from_index', select, kwargs,
+                                          unit='row of a New Horizons LORRI index')
         NewHorizonsLORRI._check_option('fov_type', fov_type, _FOV_TYPES)
+
+        # A volume's own index names its products by PATH_NAME and FILE_NAME and has no
+        # supplement; refuse it before anything is read
+        if FCPath(filepath).parent.name.upper() == _VOLUME_INDEX_DIRECTORY:
+            raise oops.host.HostIndexError(f'{NewHorizonsLORRI.NAME} reads the Ring-Moon '
+                                           f'Systems Node metadata index, such as '
+                                           f'"NHJULO_2001_index.lbl", not a volume\'s '
+                                           f'own index: {filepath}')
+
         NewHorizonsLORRI.initialize()
 
         # Read and filter the index table. The supplement is required, so None is refused
@@ -763,16 +806,13 @@ class NewHorizonsLORRI(oops.Host):
             index_path (str | pathlib.Path | FCPath): The index file or its PDS3 label.
 
         Returns:
-            FCPath: The parent of the volume for an index in a volume's INDEX directory;
-            for an index in an RMS Node metadata tree, such as
+            FCPath: For an index in an RMS Node metadata tree, such as
             ".../metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl", the matching
             volume series directory, ".../volumes/NHxxLO_xxxx"; otherwise the index's own
             directory.
         """
 
         directory = FCPath(index_path).parent
-        if directory.name.upper() == 'INDEX':
-            return directory.parent.parent
         if directory.parent.parent.name == 'metadata':
             return directory.parent.parent.parent / 'volumes' / directory.parent.name
         return directory
@@ -780,6 +820,30 @@ class NewHorizonsLORRI(oops.Host):
     ######################################################################################
     # Support methods
     ######################################################################################
+
+    @staticmethod
+    def _check_arguments(method, select, kwargs, *, unit):
+        """Raise an error for a `select` other than None or for an unexpected keyword.
+
+        Parameters:
+            method (str): The name of the calling method, for the message.
+            select (Any): The `select` argument.
+            kwargs (dict[str, Any]): The keyword arguments that the method does not take.
+            unit (str): What one observation comes from, for the message, such as "New
+                Horizons LORRI file".
+
+        Raises:
+            oops.OopsTypeError: If `kwargs` is not empty, so that a mistaken keyword,
+                such as "supplementary", is not dropped silently.
+            oops.OopsValueError: If `select` is not None.
+        """
+
+        if kwargs:
+            raise oops.OopsTypeError(f'unexpected keyword argument for '
+                                     f'NewHorizonsLORRI.{method}: {next(iter(kwargs))!r}')
+        if select is not None:
+            raise oops.OopsValueError(f'each {unit} is one observation; select must be '
+                                      f'None, not {select!r}')
 
     @staticmethod
     def _check_option(name, value, allowed):
@@ -953,7 +1017,8 @@ class NewHorizonsLORRI(oops.Host):
         both.
 
         Parameters:
-            filepath (FCPath): The path to the FITS file.
+            filepath (FCPath | None): The path to the FITS file; None for parsed content
+                that was not read from a file.
             label (Pds3Label | None): The detached label; None if it was not read.
             headers (list[astropy.io.fits.Header] | None): The header of every HDU; None
                 if the FITS file was not read.
@@ -1002,14 +1067,15 @@ class NewHorizonsLORRI(oops.Host):
 
         items = NewHorizonsLORRI._merge_items(label_items, fits_items)
         NewHorizonsLORRI._require(items, 'EXPOSURE_DURATION', filepath)
-        NewHorizonsLORRI._add_start_time_from_clock(items, filepath)
+        time_from_sclk = NewHorizonsLORRI._add_start_time_from_clock(items, filepath)
         for name in ('START_TIME', 'LINES'):
             NewHorizonsLORRI._require(items, name, filepath)
 
         lines = items['LINES']
         if lines not in _BINNING_MODES:
             raise oops.host.HostFormatError(f'unrecognized LORRI image shape: '
-                                            f'{lines} lines in {filepath}')
+                                            f'{lines} lines in '
+                                            f'{NewHorizonsLORRI._source(filepath)}')
         binning_mode = _BINNING_MODES[lines]
 
         tstart = items['START_TIME']
@@ -1022,12 +1088,18 @@ class NewHorizonsLORRI(oops.Host):
         # observer that the Snapshot will have. geom and pointing other than "spice"
         # are refused before this point when the header was not read. The header's
         # position, velocity and pointing are those of its own mid-exposure, SPCSCET.
+        # The IDs of a path and frame from the header are made unique by the file's
+        # name, or by the clock count for an HDUList that was not read from a file.
+        if filepath is not None:
+            id_name = filepath.name
+        elif header is not None:
+            id_name = str(header.get('SPCSCLK0'))
         if overrides['path'] is not None:
             default_path = overrides['path']
         elif geom == 'spice':
             default_path = _NewHorizons.PATH_ID
         else:
-            default_path = NewHorizonsLORRI._fits_path_from_header(header, filepath,
+            default_path = NewHorizonsLORRI._fits_path_from_header(header, id_name,
                                                                    header['SPCSCET'])
 
         using_cks = overrides['frame'] is None and pointing == 'spice'
@@ -1041,7 +1113,7 @@ class NewHorizonsLORRI(oops.Host):
         else:
             # Only "fitsapp" needs the epoch, to evaluate the observer's path
             default_frame = NewHorizonsLORRI._fits_frame_from_header(
-                header, filepath, pointing=pointing, path=default_path,
+                header, id_name, pointing=pointing, path=default_path,
                 tdb_midtime=header.get('SPCSCET'))
 
         # Define the Snapshot parameters
@@ -1055,13 +1127,7 @@ class NewHorizonsLORRI(oops.Host):
             'calibrations': [],         # TBD
         }
 
-        # Apply standard overrides. A remote FITS file that was not read was not
-        # fetched, so no local copy of it exists to name unless an earlier read put one
-        # in the cache.
         oops.Host._apply_overrides(params, filepath, **overrides)
-        if (header is None and not filepath.is_local()
-                and not params['abspath'].exists()):
-            del params['abspath']
 
         # The I/F calibration of a calibrated product, for the target and at the midtime
         # that the overrides leave
@@ -1098,6 +1164,7 @@ class NewHorizonsLORRI(oops.Host):
                                             for header in headers])
         NewHorizonsLORRI._insert_common_subfields(obs, items, binning_mode=binning_mode,
                                                   target=target_name, ck=using_cks,
+                                                  time_from_sclk=time_from_sclk,
                                                   return_all_planets=return_all_planets)
         return obs
 
@@ -1120,7 +1187,8 @@ class NewHorizonsLORRI(oops.Host):
 
         Raises:
             oops.OopsSpiceError: If the row gives no START_TIME and the spacecraft clock
-                kernel cannot convert its SPACECRAFT_CLOCK_START_COUNT.
+                kernel cannot convert its SPACECRAFT_CLOCK_START_COUNT. Missing pointing
+                is raised only when the observation's frame is evaluated.
             oops.host.HostFormatError: If the row's BINNING_MODE is missing or not "1X1"
                 or "4X4", or if the row gives no EXPOSURE_DURATION, or neither START_TIME
                 nor SPACECRAFT_CLOCK_START_COUNT.
@@ -1144,37 +1212,40 @@ class NewHorizonsLORRI(oops.Host):
 
         items = NewHorizonsLORRI._items_from_pds3(row_dict)
         NewHorizonsLORRI._require(items, 'EXPOSURE_DURATION', filepath)
-        NewHorizonsLORRI._add_start_time_from_clock(items, filepath)
+        time_from_sclk = NewHorizonsLORRI._add_start_time_from_clock(items, filepath)
         NewHorizonsLORRI._require(items, 'START_TIME', filepath)
 
-        tstart = items['START_TIME']
-        texp = items['EXPOSURE_DURATION']
+        cadence = oops.cadence.SnapCadence(items['START_TIME'],
+                                           items['EXPOSURE_DURATION'])
 
+        # A row whose pointing the C kernels cannot supply is kept, with a frame that
+        # raises OopsSpiceError when it is evaluated, so that one image without
+        # pointing does not stop the whole index
         using_cks = overrides['frame'] is None
+        default_frame = _SPICE_FRAME_NAME
         if using_cks:
             NewHorizonsLORRI._define_camera_frame()
+            default_frame = NewHorizonsLORRI._check_pointing(
+                NewHorizonsLORRI._effective_midtime(cadence, overrides), filepath,
+                defer=True)
 
         target_name = NewHorizonsLORRI._target_body(items.get('TARGET_NAME'))
         params = {
-            'cadence'     : oops.cadence.SnapCadence(tstart, texp),
+            'cadence'     : cadence,
             'fov'         : NewHorizonsLORRI._FOVS[binning_mode, fov_type],
             'path'        : _NewHorizons.PATH_ID,
-            'frame'       : _SPICE_FRAME_NAME,
+            'frame'       : default_frame,
             'target'      : target_name,
             'lightsource' : 'SUN',
             'calibrations': [],         # TBD
         }
         oops.Host._apply_overrides(params, filepath, **overrides)
 
-        # An index row never fetches the FITS file, so its local path would name a file
-        # not in the cache unless an earlier read put it there
-        if not filepath.is_local() and not params['abspath'].exists():
-            del params['abspath']
-
         obs = oops.observation.Snapshot(('v', 'u'), **params)
         obs.insert_subfield('dict', row_dict)
         NewHorizonsLORRI._insert_common_subfields(obs, items, binning_mode=binning_mode,
                                                   target=target_name, ck=using_cks,
+                                                  time_from_sclk=time_from_sclk,
                                                   return_all_planets=return_all_planets)
         return obs
 
@@ -1201,36 +1272,44 @@ class NewHorizonsLORRI(oops.Host):
         return cadence.midtime
 
     @staticmethod
-    def _check_pointing(tdb, filepath):
-        """Raise OopsSpiceError if the C kernels give no pointing of the camera at a time.
+    def _check_pointing(tdb, filepath, *, defer=False):
+        """Check that the C kernels give the pointing of the camera at a time.
+
+        :meth:`_define_camera_frame` must have been called first. The SPICE frame is
+        evaluated, through :meth:`oops.Host._check_spice_frame`, because the camera frame
+        above it is a fixed rotation that never consults the kernels.
 
         Parameters:
             tdb (float): The time in seconds TDB.
-            filepath (FCPath): The path to the FITS file, for the message.
+            filepath (FCPath | None): The path to the FITS file, for the message.
+            defer (bool, optional): True to return a frame that raises the error when it
+                is evaluated, rather than raising it now.
+
+        Returns:
+            str | oops.frame.SpiceErrorFrame: The camera frame's ID, "NH_LORRI", if the
+            kernels give the pointing; otherwise, with `defer`, a SpiceErrorFrame.
 
         Raises:
-            oops.OopsSpiceError: If the camera frame cannot be evaluated at `tdb`. The
-                message names the time and the file and ends with the SPICE error code,
-                such as "SPICE(NOFRAMECONNECT)".
+            oops.OopsSpiceError: If `defer` is False and the kernels give no pointing at
+                `tdb`. The message names the time and the file and ends with the SPICE
+                error code, such as "SPICE(NOFRAMECONNECT)".
         """
 
-        frame = oops.Frame.as_frame(_SPICE_FRAME_NAME).wrt(oops.Frame.J2000)
-        try:
-            frame.transform_at_time(tdb)
-        # The classes of exception that cspyce raises for a SPICE error
-        except (LookupError, OSError, RuntimeError, ValueError) as err:
-            raise oops.OopsSpiceError.from_spice_error(
-                err, description='no New Horizons LORRI pointing', time=tdb,
-                filepath=filepath) from err
+        frame = oops.Host._check_spice_frame(_FLIPPED_FRAME_ID, tdb,
+                                             description=_NO_POINTING, filepath=filepath,
+                                             defer=defer)
+        if isinstance(frame, oops.frame.SpiceErrorFrame):
+            return frame
+        return _SPICE_FRAME_NAME
 
     @staticmethod
-    def _require(items, name, source):
+    def _require(items, name, filepath):
         """Raise HostFormatError if a metadata item the Snapshot needs is missing.
 
         Parameters:
             items (dict[str, Any]): The metadata items.
             name (str): The name of the item.
-            source (str | FCPath): The image file, for the message.
+            filepath (FCPath | None): The image file, for the message.
 
         Raises:
             oops.host.HostFormatError: If `items` does not contain `name`.
@@ -1239,7 +1318,22 @@ class NewHorizonsLORRI(oops.Host):
         if name not in items:
             description = {'LINES': 'lines of the image (IMAGE LINES or NAXIS2)'}
             raise oops.host.HostFormatError(f'no {description.get(name, name)} for '
-                                            f'LORRI image {source}')
+                                            f'LORRI image '
+                                            f'{NewHorizonsLORRI._source(filepath)}')
+
+    @staticmethod
+    def _source(filepath):
+        """The image file, or a description of parsed content without one, for a message.
+
+        Parameters:
+            filepath (FCPath | None): The image file; None for parsed content that was
+                not read from a file.
+
+        Returns:
+            str | FCPath: `filepath`, or "without a file path" if it is None.
+        """
+
+        return 'without a file path' if filepath is None else filepath
 
     @staticmethod
     def _is_missing(value):
@@ -1440,7 +1534,11 @@ class NewHorizonsLORRI(oops.Host):
 
         Parameters:
             items (dict[str, Any]): The merged metadata items, changed in place.
-            filepath (FCPath): The path to the FITS file, for the message.
+            filepath (FCPath | None): The path to the FITS file, for the message.
+
+        Returns:
+            bool: True if START_TIME was converted from the clock count; False if a
+            source gives it, or if no source gives the clock count either.
 
         Raises:
             oops.OopsSpiceError: If the spacecraft clock kernel cannot convert the
@@ -1448,7 +1546,7 @@ class NewHorizonsLORRI(oops.Host):
         """
 
         if 'START_TIME' in items or 'SPACECRAFT_CLOCK_START_COUNT' not in items:
-            return
+            return False
 
         count = items['SPACECRAFT_CLOCK_START_COUNT']
         try:
@@ -1458,6 +1556,7 @@ class NewHorizonsLORRI(oops.Host):
             raise oops.OopsSpiceError.from_spice_error(
                 err, description=f'no time for the LORRI clock count {count}',
                 filepath=filepath) from err
+        return True
 
     @staticmethod
     def _iof_calibrations(header_dict, texp, *, target, tdb):
@@ -1614,7 +1713,7 @@ class NewHorizonsLORRI(oops.Host):
         return dict_
 
     @staticmethod
-    def _insert_common_subfields(obs, items, *, binning_mode, target, ck,
+    def _insert_common_subfields(obs, items, *, binning_mode, target, ck, time_from_sclk,
                                  return_all_planets):
         """Insert the subfields that file and index observations share.
 
@@ -1627,6 +1726,8 @@ class NewHorizonsLORRI(oops.Host):
                 `spice_kernels`.
             ck (bool): True if the pointing comes from the C kernels, so that they are
                 included in `spice_kernels`.
+            time_from_sclk (bool): True if the start time was converted from the clock
+                count, which becomes the `time_from_sclk` subfield.
             return_all_planets (bool): True to include the kernels of every planet and
                 of Pluto in `spice_kernels`.
         """
@@ -1634,6 +1735,7 @@ class NewHorizonsLORRI(oops.Host):
         obs.insert_subfield('host', 'New Horizons')
         obs.insert_subfield('instrument', 'LORRI')
         obs.insert_subfield('binning_mode', binning_mode)
+        obs.insert_subfield('time_from_sclk', time_from_sclk)
         for (subfield, name) in [('label_target', 'TARGET_NAME'),
                                  ('spacecraft_clock_start_count',
                                   'SPACECRAFT_CLOCK_START_COUNT'),
@@ -1702,13 +1804,13 @@ class NewHorizonsLORRI(oops.Host):
         return f'{seconds:010d}:{ticks:05d}'
 
     @staticmethod
-    def _fits_path_from_header(header, filepath, tdb_midtime):
+    def _fits_path_from_header(header, id_name, tdb_midtime):
         """The spacecraft's path as the FITS header gives it.
 
         Parameters:
             header (astropy.io.fits.Header): The primary header.
-            filepath (FCPath): The path to the FITS file, whose name makes the path's ID
-                unique.
+            id_name (str): The name that makes the path's ID unique, as
+                :meth:`_make_snapshot` gives it.
             tdb_midtime (float): The middle of the exposure in seconds TDB.
 
         Returns:
@@ -1723,17 +1825,17 @@ class NewHorizonsLORRI(oops.Host):
 
         # The path ID has to be unique to this observation
         sc_path = oops.path.LinearPath((pos, vel), tdb_midtime, 'SUN', frame='J2000',
-                                       path_id='.NH_PATH_' + filepath.name)
+                                       path_id='.NH_PATH_' + id_name)
         return oops.Path.as_waypoint(sc_path)
 
     @staticmethod
-    def _fits_frame_from_header(header, filepath, *, pointing, path, tdb_midtime):
+    def _fits_frame_from_header(header, id_name, *, pointing, path, tdb_midtime):
         """The camera frame as the FITS header gives it.
 
         Parameters:
             header (astropy.io.fits.Header): The primary header.
-            filepath (FCPath): The path to the FITS file, whose name makes the frame's ID
-                unique.
+            id_name (str): The name that makes the frame's ID unique, as
+                :meth:`_make_snapshot` gives it.
             pointing (str): "fits", "fitsapp" or "fits90", as for :meth:`from_file`.
             path (str | oops.Path): The spacecraft's path, needed for "fitsapp".
             tdb_midtime (float): The middle of the exposure in seconds TDB.
@@ -1764,7 +1866,7 @@ class NewHorizonsLORRI(oops.Host):
 
         frame = oops.frame.Cmatrix.from_ra_dec(ra_deg, dec_deg, north_clock_deg,
                                                oops.Frame.J2000,
-                                               frame_id='.NH_FRAME_' + filepath.name)
+                                               frame_id='.NH_FRAME_' + id_name)
         return oops.Frame.as_wayframe(frame)
 
     @staticmethod
@@ -1857,8 +1959,10 @@ class NewHorizonsLORRI(oops.Host):
                 None to ignore.
             meta (str, optional): The name of a metakernel to furnish instead of the
                 kernels selected from the database.
-            planets (list, optional): A list of planets to pass to
-                :meth:`~oops.Body.define_solar_system`. None or 0 means all.
+            planets (int | collections.abc.Sequence[int], optional): The planet number,
+                1 to 9, or a sequence of planet numbers, such as (5, 9) for Jupiter and
+                Pluto, whose bodies :meth:`~oops.Body.define_solar_system` defines with
+                their moons. None or 0 means all nine.
             irregulars (bool, optional): True to include the irregular satellites; False
                 otherwise.
 

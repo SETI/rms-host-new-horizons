@@ -13,11 +13,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import cspyce
+import filecache
 import numpy as np
 import oops
 import pytest
 import spicedb
 from astropy.io import fits
+from filecache import FCPath, FileCache
 
 from host_new_horizons.oops.lorri import NewHorizonsLORRI
 
@@ -297,6 +299,26 @@ def fake_spice(monkeypatch: pytest.MonkeyPatch) -> FakeSpice:
     monkeypatch.setattr(oops.Frame, '_FRAME_REGISTRY', dict(oops.Frame._FRAME_REGISTRY))
     monkeypatch.setattr(oops.Frame, '_FRAME_CACHE', dict(oops.Frame._FRAME_CACHE))
     return fake
+
+
+def cache_file(url: str) -> pathlib.Path:
+    """Put an empty file in the test's file cache as the local copy of `url`, as an
+    earlier read would have, and return its local path."""
+
+    local_path = FCPath(url).get_local_path()
+    assert isinstance(local_path, pathlib.Path)
+    local_path.write_bytes(b'')
+    return local_path
+
+
+@pytest.fixture(autouse=True)
+def file_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> FileCache:
+    """Give every test its own empty file cache, so that what an earlier test or another
+    program put in the shared cache never decides whether a remote file is cached."""
+
+    cache = FileCache(cache_root=tmp_path / 'filecache')
+    monkeypatch.setattr(filecache.file_cache_path, '_DEFAULT_FILECACHE', cache)
+    return cache
 
 
 @pytest.fixture(autouse=True)
