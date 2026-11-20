@@ -21,7 +21,7 @@ What is read
 A path that ends in ``.fit`` or ``.fits``, in any case, is read as a FITS file, and any
 other path as a PDS3 label. What the host reads depends on the file it is given and on
 the ``astrometry`` option. An astrometry read is for work that needs only the image's
-time and geometry, so it reads no image array.
+time and geometry, so it leaves the image arrays unread.
 
 .. list-table::
    :header-rows: 1
@@ -40,9 +40,9 @@ The metadata come from whatever was read, as :doc:`user_guide_metadata` describe
 ``data`` subfield, and the ``error`` and ``quality`` subfields of a calibrated image,
 hold the image arrays except in an astrometry read.
 
-An astrometry read of a PDS3 label reads no FITS header. It accepts only the default
-``geom`` and ``pointing`` options, which take the position and the pointing from the
-SPICE kernels, and it gives no I/F calibration.
+An astrometry read of a PDS3 label reads the label alone, without the FITS header. It
+accepts only the default ``geom`` and ``pointing`` options, which take the position and
+the pointing from the SPICE kernels, and its list of calibrations is empty.
 
 Finding the FITS file
 =====================

@@ -24,8 +24,8 @@ Every image becomes an OOPS :class:`~oops.observation.Snapshot`, with the image 
 is the primary image exactly as the FITS file stores it. A raw image holds a few columns
 beyond the field of view, and ``data`` keeps them. A calibrated image also holds its
 error estimates and its quality flags, which the host gives as the ``error`` and
-``quality`` subfields. A raw image has neither, and an astrometry read gives none of
-the three arrays.
+``quality`` subfields. A raw image has neither, and an astrometry read leaves all three
+arrays unread.
 
 Binning modes and fields of view
 ================================
@@ -58,8 +58,9 @@ is the exposure duration, F is 176 erg/cm²/s/Å, the solar flux at 1 AU at the 
 wavelength of LORRI, and r is the target's distance from the Sun in AU at the middle of
 the exposure, from the SPICE kernels.
 
-The observation's list of calibrations is empty for a raw image, which gives no RSOLAR,
-and for an astrometry read of a PDS3 label, which reads no FITS header. It is also empty
+The observation's list of calibrations is empty for a raw image, whose FITS header lacks
+RSOLAR, and for an astrometry read of a PDS3 label, which leaves the FITS header unread.
+It is also empty
 when the exposure is zero, when the target is the Sun or ``NONE``, when the kernels
 cannot place the target at that time, and for every index row. The caller can supply a
 calibration with the ``calibrations`` override in every case.

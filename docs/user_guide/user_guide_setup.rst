@@ -81,6 +81,6 @@ effect.
 Image files and indexes
 =======================
 
-The host needs no environment variable for the archive itself. Each FITS file, PDS3
+The archive itself is found without an environment variable. Each FITS file, PDS3
 label, or index is passed by its path or URL, and a remote file is retrieved and cached
 when it is read.

@@ -4,16 +4,18 @@ Reading a PDS3 Index
 
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` makes one
 :class:`~oops.observation.Snapshot` for each row of a PDS3 index. It reads only the
-index tables and opens none of the images, which makes it much faster than opening a
+index tables and leaves the images unopened, which makes it much faster than opening a
 volume's images one at a time.
 
 It returns an iterator, which gives the Snapshots row by row, in the order of the index.
-The call itself checks the arguments and reads the index, so a wrong argument or an index
-that cannot be read raises an error at once. Each row's Snapshot is built only when the
-iteration reaches that row, so an error in a row is raised there, after the rows before
-it. The iteration ends at that row: the rows after it are not built. The ``filter``
-argument, described below, can leave such a row out. To build every row at once, pass
-the iterator to ``list()``:
+The call itself checks the arguments and reads the PDS3 labels of the index and its
+supplement, so a wrong argument or a label that cannot be read raises an error at once.
+The rows are read as the iteration proceeds, a few at a time, and each row's Snapshot is
+built when the iteration reaches that row. The memory used stays the same however long
+the index is. An error in a row is raised when the iteration reaches it, after the rows
+before it have been given. The iteration ends at that row, and the rows after it are not
+built. The ``filter`` argument, described below, can leave such a row out. To build
+every row at once, pass the iterator to ``list()``:
 
 .. code-block:: python
 
@@ -43,7 +45,10 @@ exposure duration rounded to the millisecond, such as 0.501 s where the label gi
 0.5006 s. It leaves out the number and colon at the start of some sequence IDs. And it
 gives the target names of five moons of Jupiter, Io, Europa, Himalia, Elara, and
 Callirrhoe, without the ``J1``, ``J2``, ``J6``, ``J7``, or ``J17`` that their labels put
-in front, as in ``IO`` for ``J1 IO``.
+in front, as in ``IO`` for ``J1 IO``. Every label of each of these moons writes its name
+the same way, so until the supplement is corrected, the host writes these five names as
+the labels do. Ganymede and Callisto have no number in front in any label, and the
+supplement agrees.
 
 The ``supplement`` argument chooses the supplemental index:
 
@@ -54,14 +59,24 @@ The ``supplement`` argument chooses the supplemental index:
 - A path or URL reads that file instead.
 - None raises :exc:`~oops.host.HostIndexError`, unless ``row_dicts`` is given.
 
-The two tables must list the same images, but not necessarily in the same order. When
-they list them in the same order, each index row is merged with the supplement row in
-the same position. When they do not, as in ``NHJULO_1001`` and ``NHxxLO_1999``, each
-index row is merged with the supplement row that has the same ``VOLUME_ID`` and
-``FILE_SPECIFICATION_NAME``. The host raises :exc:`~oops.host.HostIndexError` if an
-image appears in only one of the tables, or if, when the orders differ, either table
-lists an image twice. The error names the first few such images and both tables. The
-Snapshots come in the order of the index.
+The two tables must list the same images, but not necessarily in the same order: in
+``NHJULO_1001`` and the cumulative ``NHxxLO_1999``, the index lists one image last that
+the supplement lists in date order. So each index row is merged with the supplement row
+that has the same ``VOLUME_ID`` and ``FILE_SPECIFICATION_NAME``. The supplement is read
+only as far ahead as the row that matches the current index row, and the rows read
+ahead are kept until their own index rows come. The Snapshots come in the order of the
+index.
+
+The host raises :exc:`~oops.host.HostIndexError`, naming both tables, when the two do
+not list the same images:
+
+- When an index row's image is not in the supplement. The host finds this only once it
+  has read the whole supplement, so the error comes after the Snapshots of the rows
+  before it. An image that the index lists twice is found this way too.
+- When the supplement lists an image a second time while its first row is still being
+  kept.
+- After the last index row, when the supplement lists images that the index does not, or
+  lists an image more times than the index.
 
 Other arguments
 ===============
@@ -70,14 +85,17 @@ Other arguments
     The index's PDS3 label, if it has already been parsed.
 
 ``row_dicts``
-    The rows themselves, one dictionary per row, if the tables have already been read.
-    The host then reads neither table, and ``supplement`` and ``label`` are ignored.
+    The rows themselves, one dictionary per row, each already merged with its
+    supplement row, as a list or any other iterable. The host then reads neither table,
+    and ``supplement`` and ``label`` are ignored.
 
 ``filter``
     A dictionary of column names and the values to keep. A row is kept when each column
     equals its value, is one of a set of values, or falls in a range given as a tuple of
-    two values. A row without one of the columns is left out, and a column that no row
-    has raises :exc:`~oops.OopsValueError`.
+    two values. A row without one of the columns is left out. A column that neither
+    table has raises :exc:`~oops.OopsValueError` when the method is called, and a range
+    that cannot be compared with a row's value raises :exc:`~oops.OopsTypeError` when
+    the iteration reaches that row.
 
 ``select``
     Must be None. Each row is one image, so there is nothing to select, and any other
@@ -101,7 +119,9 @@ constant of the vectors and distances, and there a zero can be real. The target'
 vectors and distances are left out only for an image that has no target geometry, whose
 vector from the spacecraft to the target is zero. They are kept otherwise, so that an
 image of the Sun keeps the Sun's distance of zero from itself. Any other vector is left
-out only when all of its components are zero.
+out only when all of its components are zero. These rules apply only until the
+supplement is corrected: once it declares a null constant that is never a real value,
+no zero is equal to it, and every zero is kept.
 
 The subfields are those of an image read from its label (see
 :doc:`user_guide_metadata`), except ``data``, ``error``, ``quality``, ``label_dict``,
@@ -109,11 +129,11 @@ The subfields are those of an image read from its label (see
 column, and the exposure from the supplement's ``EXPOSURE_DURATION``, which is rounded to
 the millisecond. The target comes from ``TARGET_NAME`` as for a label (see
 :doc:`user_guide_geometry`). For the five moons of Jupiter that the supplement lists
-without their number, ``label_target`` is the supplement's name, such as ``IO``, and the
-target is the same as from the label. By default the pointing comes from the C kernels
-and the position from the SPICE ephemerides, and the ``frame`` and ``path`` overrides
-replace them. A row has no default I/F calibration, because it gives no RSOLAR, but the
-``calibrations`` override supplies one.
+without their number, ``TARGET_NAME`` in ``dict`` and ``label_target`` give the label's
+name, such as ``J1 IO``, as for an image read from its label. By default the pointing
+comes from the C kernels and the position from the SPICE ephemerides, and the ``frame``
+and ``path`` overrides replace them. A row's list of calibrations is empty, because the
+tables lack RSOLAR, but the ``calibrations`` override supplies one.
 
 The host looks up the pointing of each row at the middle of its exposure, but a row
 whose pointing the C kernels do not hold still gives a Snapshot. Its frame raises
@@ -135,7 +155,7 @@ the location of the index:
 
 The row's ``VOLUME_ID`` and file specification complete the path. ``abspath`` is present
 only when the FITS file exists locally or is already in the local cache. Building the
-Snapshots creates no directories.
+Snapshots leaves the file system as it was: it does not create directories.
 
 A volume's own index, in its ``INDEX`` directory, gives the path of each image in other
 columns and has no supplement, so the host does not read it. Passing an index from a

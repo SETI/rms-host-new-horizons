@@ -70,7 +70,7 @@ from the same label, for every image:
      - PDS3 label
      - The two agreed on every product checked.
 
-If the chosen label gives no value for an item, the other label's value is used.
+If the chosen label lacks a value for an item, the other label's value is used.
 
 Missing values
 ==============

@@ -30,14 +30,14 @@ from the C kernels, it checks at once that they hold the pointing at the middle 
 exposure, after any ``cadence`` or ``timeshift`` override. If they do not, it raises
 :exc:`oops.OopsSpiceError` (see :doc:`user_guide_errors`).
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` looks the pointing up
-in the same way but raises nothing: a row without pointing still gives a Snapshot, and
-its frame raises :exc:`oops.OopsSpiceError` when it is evaluated.
+in the same way, and a row without pointing still gives a Snapshot, whose frame raises
+:exc:`oops.OopsSpiceError` when it is evaluated.
 
 The pointing can also come from the FITS header, with the ``pointing`` option (see
 :doc:`user_guide_files`), and the spacecraft's position likewise with the ``geom``
 option. A caller that has better pointing can pass it with the ``frame`` override, for
 example as a :class:`~oops.frame.Cmatrix`. With either, the host does not consult the
-C kernels, and raises no error about missing pointing.
+C kernels, so a missing C kernel never raises an error.
 
 Targets and light sources
 =========================

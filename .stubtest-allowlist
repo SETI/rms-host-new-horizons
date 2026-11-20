@@ -3,7 +3,7 @@
 # The supported imports are "from host_new_horizons import ..." and
 # "from host_new_horizons.oops import ...", so the stubs of those two packages describe
 # the whole public API. host_new_horizons.oops imports the module below, which is
-# implementation detail and deliberately carries no stub; stubtest reports it as "failed
-# to find stubs", which this file accepts. Nothing else is accepted: a public name missing from the two
-# stubs still fails the check.
+# implementation detail and deliberately left without a stub; stubtest reports it as
+# "failed to find stubs", which this file accepts. Nothing else is accepted: a public name
+# missing from the two stubs still fails the check.
 host_new_horizons\.oops\.lorri
