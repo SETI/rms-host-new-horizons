@@ -108,20 +108,24 @@ described below.
   default is empty for a raw product, a label-only read, a zero exposure, the Sun (zero
   AU from itself), a target without a path or an ephemeris, and every index row. A
   `calibrations` override replaces it in `from_file()` and `from_index()` alike.
-- With the pointing from the C kernels, `from_file()` evaluates the camera frame at
-  `oops.Host._pointing_time()`, the midtime after the `cadence` override and a "T"
-  and/or "F" `timeshift` (`_check_pointing()`, which calls
-  `oops.Host._check_spice_frame()` with `defer=False`), and raises
-  `oops.OopsSpiceError` with the SPICE error code if the kernels give none. oops
-  evaluates the frame relative to J2000, so the check reaches the SPICE frame
-  `NH_LORRI_FLIPPED` beneath the camera's Cmatrix. It does not check when `frame` is
-  given or `pointing` is not "spice". `from_index()` makes the same check at each row's
-  `_pointing_time()` with `defer=True`: a row without pointing gets an
-  `oops.frame.SpiceErrorFrame`, which
-  raises `oops.OopsSpiceError` when it is evaluated, so that one image without pointing
-  does not stop the whole index. In the tests, the fake SPICE frame is a class of its
-  own (`FakeSpiceFrame` in `tests/oops/conftest.py`), so that a test can take its data
-  away while the camera's Cmatrix still works.
+- With the pointing from the C kernels, `from_file()` checks the camera frame before
+  the overrides are applied (`_check_pointing()`, which passes the cadence and the
+  overrides to `oops.Host._check_spice_frame()` with `defer=False`), and raises
+  `oops.OopsSpiceError` with the SPICE error code if the kernels give none. oops builds
+  the frame and the time as `_apply_overrides()` will and evaluates the frame relative
+  to J2000, so the check reaches the SPICE frame `NH_LORRI_FLIPPED` beneath the camera's
+  Cmatrix, at the midtime after the `cadence` override and a "T" `timeshift`. An "F"
+  `timeshift` wraps the Cmatrix in a FrameShift, which shifts only the Cmatrix's own
+  fixed rotation, so the kernels are still read at that midtime. Whether "F" should
+  shift the whole chain is an open question in rms-oops (cited in the `#` comment in
+  `_check_pointing()`); the host follows what oops does. It does not check when `frame`
+  is given or `pointing` is not "spice". `from_index()` makes the same check for each
+  row with `defer=True`: a row without pointing gets an `oops.frame.SpiceErrorFrame`,
+  which raises `oops.OopsSpiceError` when it is evaluated, so that one image without
+  pointing does not stop the whole index. In the tests, the fake SPICE frame is a class
+  of its own (`FakeSpiceFrame` in `tests/oops/conftest.py`), so that a test can take its
+  data away while the camera's Cmatrix still works, and `spice_check_times()` in
+  `tests/oops/test_lorri_merge.py` records the times at which the check evaluates it.
 - `from_file()` and `from_index()` both refuse a `select` other than None
   (`oops.Host._check_select()`, `OopsValueError`) and any keyword they do not take
   (`oops.Host._check_keywords()`, `OopsTypeError`) at call time. `abspath` is given only
@@ -146,12 +150,15 @@ described below.
   anything is read. Each row's path subfields name the FITS file in full, under
   `oops.Host._volumes_directory()` of the index's location.
 - `MERGE_SUPPLEMENT_BY_FILE` is True: rows are paired by `VOLUME_ID` and
-  `FILE_SPECIFICATION_NAME` (`file_key=_INDEX_KEYS`), because the NHJULO_1001 index, and
-  so NHxxLO_1999, lists `lor_0035089864_0x632_eng` out of place, last, instead of at row
-  679 (counting from 1), where the supplement, which is in file order, has it. The other
-  14 of the 16 metadata indexes are in step, and pairing by file gives them the same
-  rows. oops would choose the same key, but the explicit key makes it refuse a table
-  without VOLUME_ID at call time instead of pairing by FILE_SPECIFICATION_NAME alone.
+  `FILE_SPECIFICATION_NAME` (`file_key=_INDEX_KEYS`), because the NHJULO_1001 index
+  lists `lor_0035089864_0x632_eng` out of place, last, instead of at row 679 (counting
+  from 1), where the supplement, which is in file order, has it; in the cumulative
+  NHxxLO_1999 the two tables differ from row 1,925 on for the same reason. The other 14 of the 16 metadata
+  indexes are in step, and pairing by file gives them the same rows. oops would choose
+  the same key, but the explicit key makes it refuse a table without VOLUME_ID at call
+  time instead of pairing by FILE_SPECIFICATION_NAME alone. A row of `row_dicts` (or a
+  null value) without either key column raises `HostFormatError` when the iteration
+  reaches it (`_snapshot_from_row()`).
   Only the file key is compared (`validate=()`), and the supplement wins every shared column
   (`prefer_supplement=True`; the index gives clock counts with a partition, rounds the
   stop count differently, gives PRODUCT_CREATION_TIME as a date alone, and shortens some

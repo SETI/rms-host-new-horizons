@@ -50,11 +50,13 @@ Finding the FITS file
 =====================
 
 Given a PDS3 label, the host looks in the label's directory for the FITS file that the
-label's ``^IMAGE`` pointer gives. The archive spells the FITS file's name in the same
-case as the label's, so the host tries that case first, then the name as the label
-spells it, then the name in lower case, and last in upper case. An astrometry read does
-not look for the file, so its path subfields give the name in the case of the label's
-own name.
+label's ``^IMAGE`` pointer gives. That name must end in ``.fit`` or ``.fits``, in any
+case, as the name of every archive product does; a label that points to a file with
+another suffix raises :exc:`~oops.host.PdsHostError`. The archive spells the FITS file's
+name in the same case as the label's, so the host tries that case first, then the name
+as the label spells it, then the name in lower case, and last in upper case. An
+astrometry read does not look for the file, so its path subfields give the name in the
+case of the label's own name, whatever its suffix.
 
 The ``filepath``, ``basename``, ``abspath``, and ``image_url`` subfields always give the
 FITS file, also when the input is the label. ``abspath`` is the file's local path, and

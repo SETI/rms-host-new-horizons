@@ -11,10 +11,11 @@ Reading an image file
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` raises:
 
 :exc:`oops.OopsSpiceError`
-    The C kernels lack the pointing of the camera at the time when the frame will be
-    evaluated, the middle of the exposure moved by any ``cadence`` or ``timeshift``
-    override (see :doc:`user_guide_geometry`). The message gives the time and the FITS file, and ends with the SPICE error code, such
-    as ``SPICE(NOFRAMECONNECT)``. It is never raised for missing pointing when the
+    The C kernels lack the pointing of the camera at the time when the observation will
+    read them, the middle of the exposure as a ``cadence`` override or a ``timeshift`` of
+    the start and stop times sets it (see :doc:`user_guide_geometry`). The message gives
+    the time and the FITS file, and ends with the SPICE error code, such as
+    ``SPICE(NOFRAMECONNECT)``. It is never raised for missing pointing when the
     caller supplies the pointing with the ``frame`` override, or takes it from the FITS
     header with the ``pointing`` option. Whatever the pointing, it is also raised when
     the labels read lack a start time and the clock kernel cannot convert the clock
@@ -30,7 +31,8 @@ Reading an image file
 
 :exc:`~oops.host.PdsHostError`
     None of the fast, strict, and loose methods of the parser can read the PDS3 label,
-    or the label has no ``^IMAGE`` pointer to a FITS file.
+    the label has no ``^IMAGE`` pointer to a FITS file, or, in a read that opens the
+    FITS file, the name it points to does not end in ``.fit`` or ``.fits``.
 
 :exc:`~oops.host.WrongHostError`
     The file, or the parsed label or FITS file passed in, is not of a New Horizons
@@ -77,9 +79,10 @@ Reading a PDS3 index
     file does not exist, which the iteration finds when it starts.
 
 :exc:`~oops.host.HostFormatError`
-    A row's ``BINNING_MODE`` is missing or is not ``1X1`` or ``4X4``, or a row lacks the
-    exposure duration, or lacks both a start time and a clock count. This error is
-    raised when the iteration reaches that row.
+    A row lacks ``VOLUME_ID`` or ``FILE_SPECIFICATION_NAME``, which only a row given in
+    ``row_dicts`` or a null value can; a row's ``BINNING_MODE`` is missing or is not
+    ``1X1`` or ``4X4``; or a row lacks the exposure duration, or lacks both a start time
+    and a clock count. This error is raised when the iteration reaches that row.
 
 :exc:`oops.OopsSpiceError`
     A row lacks a start time, and the clock kernel cannot convert its clock count. This

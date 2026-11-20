@@ -42,7 +42,7 @@ See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
    ./scripts/run-all-checks.sh
    ```
 
-5. Commit your changes with a subject written as a plain imperative sentence, with no type prefix:
+5. Commit your changes with a subject written as a plain imperative sentence, without a type prefix:
 
    ```bash
    git commit -m "Take the start time from the spacecraft clock count"

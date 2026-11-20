@@ -709,22 +709,50 @@ def test_frame_of_a_row_without_pointing_raises_oops_spice_error(
         obs.frame.transform_at_time(obs.time[0])
 
 
+def spice_check_times(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record the times at which the pointing check evaluates the SPICE frame beneath the
+    camera frame; return the list that the times are appended to."""
+
+    times: list[float] = []
+    checking: list[bool] = []
+    original_check = oops.Host._check_spice_frame
+    original_transform = FakeSpiceFrame.transform_at_time
+
+    def check_spice_frame(*args: Any, **kwargs: Any) -> Any:
+        checking.append(True)
+        try:
+            return original_check(*args, **kwargs)
+        finally:
+            checking.pop()
+
+    def transform_at_time(self: Any, time: Any, *, quick: Any = None) -> Any:
+        if checking:
+            times.append(float(oops.Scalar.as_scalar(time).vals))
+        return original_transform(self, time, quick=quick)
+
+    monkeypatch.setattr(oops.Host, '_check_spice_frame', staticmethod(check_spice_frame))
+    monkeypatch.setattr(FakeSpiceFrame, 'transform_at_time', transform_at_time)
+    return times
+
+
+# What a time shift of the frame should mean for a camera frame that is a fixed rotation
+# over a SPICE frame is an open question, SETI/rms-oops#251; these tests follow what oops
+# does now
 @pytest.mark.parametrize(('options', 'expected'), [
     ({'timeshift': (3., 'T')}, MIDTIME + 3.),
     ({'timeshift': (3., 'PT')}, MIDTIME + 3.),
-    ({'timeshift': (3., 'F')}, MIDTIME + 3.),
-    ({'timeshift': (3., 'TF')}, MIDTIME + 6.),
+    ({'timeshift': (3., 'F')}, MIDTIME),
+    ({'timeshift': (3., 'TF')}, MIDTIME + 3.),
     ({'timeshift': (3., 't'), 'cadence': oops.cadence.SnapCadence(1000., 10.)}, 1008.),
 ])
 def test_pointing_is_checked_at_the_shifted_midtime(
         tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, options: dict[str, Any],
         expected: float) -> None:
-    """A time shift of the cadence ("T") moves the time the pointing is checked at, and
-    one of the frame ("F") moves it again, by the time at which the frame is evaluated."""
+    """A time shift of the cadence ("T") moves the time at which the C kernels are read.
+    One of the frame ("F") shifts only the camera's fixed rotation, so the SPICE frame
+    beneath it is read at the observation's own time."""
 
-    times = []
-    monkeypatch.setattr(NewHorizonsLORRI, '_check_pointing',
-                        staticmethod(lambda tdb, filepath: times.append(tdb)))
+    times = spice_check_times(monkeypatch)
     NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), **options)
     assert times == [pytest.approx(expected, abs=1.e-6)]
 
@@ -742,22 +770,33 @@ def pointing_until(monkeypatch: pytest.MonkeyPatch, last: float) -> None:
     monkeypatch.setattr(FakeSpiceFrame, 'transform_at_time', transform_at_time)
 
 
-def test_frame_time_shift_is_checked_where_the_pointing_ends(
+def test_frame_time_shift_loads_where_the_pointing_ends(
         tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With the pointing ending one second after the midtime, a three-second shift of the
-    frame alone is evaluated past the end and so is refused at once."""
+    frame alone loads, because the observation reads the SPICE frame at its midtime."""
+
+    path = write_fits(tmp_path / 'lor_test.fit')
+    pointing_until(monkeypatch, MIDTIME + 1.)
+    obs = NewHorizonsLORRI.from_file(path, timeshift=(3., 'F'))
+    transform = oops.Frame.as_frame(obs.frame).wrt(oops.Frame.J2000).transform_at_time(
+        obs.midtime)
+    assert isinstance(transform, oops.Transform)
+
+
+def test_cadence_time_shift_is_checked_where_the_pointing_ends(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the pointing ending one second after the midtime, a three-second shift of the
+    cadence moves the midtime past the end and so is refused at once."""
 
     path = write_fits(tmp_path / 'lor_test.fit')
     pointing_until(monkeypatch, MIDTIME + 1.)
     with pytest.raises(oops.OopsSpiceError, match=r'SPICE\(CKINSUFFDATA\)$'):
-        NewHorizonsLORRI.from_file(path, timeshift=(3., 'F'))
+        NewHorizonsLORRI.from_file(path, timeshift=(3., 'T'))
 
 
 def test_pointing_is_checked_at_the_cadence_override(
         tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    times = []
-    monkeypatch.setattr(NewHorizonsLORRI, '_check_pointing',
-                        staticmethod(lambda tdb, filepath: times.append(tdb)))
+    times = spice_check_times(monkeypatch)
     cadence = oops.cadence.SnapCadence(1000., 10.)
     NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), cadence=cadence)
     assert times == [1005.]
@@ -766,18 +805,12 @@ def test_pointing_is_checked_at_the_cadence_override(
 @pytest.mark.parametrize(('options', 'expected'), [
     ({'cadence': oops.cadence.SnapCadence(1000., 10.)}, 1005.),
     ({'timeshift': (3., 'T')}, ROW_MIDTIME + 3.),
-    ({'timeshift': (3., 'f')}, ROW_MIDTIME + 3.),
+    ({'timeshift': (3., 'f')}, ROW_MIDTIME),
 ])
 def test_from_index_pointing_is_checked_at_the_overridden_midtime(
         tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, options: dict[str, Any],
         expected: float) -> None:
-    times = []
-
-    def check_pointing(tdb: float, filepath: Any, *, defer: bool = False) -> str:
-        times.append(tdb)
-        return 'NH_LORRI'
-
-    monkeypatch.setattr(NewHorizonsLORRI, '_check_pointing', staticmethod(check_pointing))
+    times = spice_check_times(monkeypatch)
     list(NewHorizonsLORRI.from_index(tmp_path / 'NHJULO_2001_index.lbl',
                                      row_dicts=[dict(INDEX_ROW)], **options))
     assert times == [pytest.approx(expected, abs=1.e-6)]

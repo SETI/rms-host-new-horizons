@@ -27,9 +27,11 @@ and *z* axes reversed. The ``spice_to_frame`` subfield holds that rotation.
 
 When :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` builds the frame
 from the C kernels, it checks at once that they hold the pointing at the time when the
-frame will be evaluated. That is the middle of the exposure, moved by any ``cadence``
-override, and by a ``timeshift`` of the start and stop times ("T"), of the frame ("F"),
-or of both, which moves it twice. If they do not, it raises
+observation will read them. That is the middle of the exposure, moved by any
+``cadence`` override and by a ``timeshift`` of the start and stop times ("T"). A
+``timeshift`` of the frame ("F") shifts only the fixed rotation from ``NH_LORRI_FLIPPED``
+to ``NH_LORRI``, so the C kernels are still read at that time. If they do not hold the
+pointing, it raises
 :exc:`oops.OopsSpiceError` (see :doc:`user_guide_errors`).
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` looks the pointing up
 in the same way, and a row without pointing still gives a Snapshot, whose frame raises

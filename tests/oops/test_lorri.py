@@ -902,6 +902,18 @@ def test_from_file_label_without_an_image(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_file(label)
 
 
+def test_from_file_label_pointing_to_another_suffix(tmp_path: pathlib.Path) -> None:
+    """oops opens a FITS file by its suffix, .fit or .fits, which every archive product
+    has, so a label that points to a file with another suffix is refused."""
+
+    write_fits(tmp_path / 'lor_test.fts')
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FTS')
+    with pytest.raises(oops.host.PdsHostError,
+                       match=r'^PDS3 label points to LOR_TEST\.FTS, whose name does not '
+                             r'end in \.fit or \.fits: .*lor_test\.lbl$'):
+        NewHorizonsLORRI.from_file(label)
+
+
 def test_from_file_label_of_another_instrument(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'mvic_test.lbl', 'MVIC_TEST.FIT',
                         INSTRUMENT_ID='"MVIC"')
@@ -1407,6 +1419,19 @@ def test_from_index_rejects_a_missing_binning_mode(null: str | None) -> None:
     with pytest.raises(oops.host.HostFormatError,
                        match=r'unrecognized LORRI BINNING_MODE: missing in '
                              r'.*NHJULO_2001/'):
+        next(snapshots)
+
+
+@pytest.mark.parametrize('column', ['VOLUME_ID', 'FILE_SPECIFICATION_NAME'])
+def test_from_index_rejects_a_row_without_a_file_key(column: str) -> None:
+    """A table without the column is refused when from_index() is called; a row of
+    `row_dicts` without it is refused when the iteration reaches it."""
+
+    row_dict = row()
+    del row_dict[column]
+    snapshots = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+    with pytest.raises(oops.host.HostFormatError,
+                       match=rf'^no {column} in a LORRI index row$'):
         next(snapshots)
 
 

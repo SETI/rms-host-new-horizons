@@ -119,7 +119,8 @@ _SCLK_TICKS = 50000
 # two tables are paired (see MERGE_SUPPLEMENT_BY_FILE). oops would choose the same key
 # from these tables, but it pairs tables without VOLUME_ID by FILE_SPECIFICATION_NAME
 # alone, and the host needs VOLUME_ID for the path of each row's file. Giving the key
-# makes oops refuse a table that lacks either column when from_index() is called.
+# makes oops refuse a table that lacks either column when from_index() is called; a row
+# of `row_dicts` that lacks either raises HostFormatError when the iteration reaches it.
 _INDEX_KEYS = ('VOLUME_ID', 'FILE_SPECIFICATION_NAME')
 
 # The names that the index and the supplement give five moons of Jupiter, and the names
@@ -490,14 +491,15 @@ class NewHorizonsLORRI(oops.Host):
             FileNotFoundError: If the FITS file that a PDS3 label names does not exist,
                 except in an astrometry read.
             oops.OopsSpiceError: If the pointing comes from the C kernels and they give
-                none at the time when the frame will be evaluated: mid-exposure, or the
-                middle of `cadence` if it is given, moved by a `timeshift` of the
-                start/stop time ("T"), of the frame ("F"), or of both, which moves it
-                twice. Its message gives the time and the FITS file and ends with the
-                SPICE error code, such as "SPICE(NOFRAMECONNECT)". Never raised when
-                `frame` is given or `pointing` is not "spice". Also raised if no source
-                gives the start time and the spacecraft clock kernel cannot convert the
-                clock count.
+                none at the time when the observation will read them: mid-exposure, or
+                the middle of `cadence` if it is given, moved by a `timeshift` of the
+                start/stop time ("T"). A `timeshift` of the frame ("F") shifts only the
+                camera's fixed rotation above the SPICE frame, so the kernels are read
+                at that same time. Its message gives the time and the FITS file and ends
+                with the SPICE error code, such as "SPICE(NOFRAMECONNECT)". Never raised
+                when `frame` is given or `pointing` is not "spice". Also raised if no
+                source gives the start time and the spacecraft clock kernel cannot
+                convert the clock count.
             oops.OopsTypeError: If a keyword argument is not one of those listed.
             oops.OopsValueError: If `geom`, `pointing` or `fov_type` is not one of the
                 values listed above, if `select` is not None, if `geom` or `pointing` is
@@ -510,7 +512,9 @@ class NewHorizonsLORRI(oops.Host):
                 FITS file, or if the sources read lack the exposure duration, the lines
                 of the image, or both the start time and the clock count.
             oops.host.PdsHostError: If no method of the PDS3 label parser can read the
-                label, or if the label lacks an ``^IMAGE`` pointer to a FITS file.
+                label, if the label lacks an ``^IMAGE`` pointer to a FITS file, or, except
+                in an astrometry read, if the name it points to does not end in ".fit" or
+                ".fits" in either case.
             oops.host.WrongHostError: If `fileinfo` is not a New Horizons LORRI PDS3 label
                 or FITS file.
             OSError: If the file cannot be read.
@@ -734,8 +738,10 @@ class NewHorizonsLORRI(oops.Host):
             for "J1 IO". These five names are written as the labels write them, in
             TARGET_NAME and in `label_target`, so both are the same as from
             :meth:`from_file`. The target body comes from TARGET_NAME as for
-            :meth:`from_file`. The C kernels are consulted at each row's midtime, but a
-            row without pointing still gives an observation, and its frame raises
+            :meth:`from_file`. The C kernels are consulted at the time at which
+            :meth:`from_file` would read them, the row's midtime moved by a `cadence`
+            override and by a `timeshift` of the start/stop time ("T"), but a row
+            without pointing still gives an observation, and its frame raises
             `oops.OopsSpiceError` when it is evaluated.
             `filepath`, `basename`, `image_url`, and `abspath` name the FITS file, as a
             full path or URL: the row's FILE_SPECIFICATION_NAME, with the label's
@@ -761,10 +767,11 @@ class NewHorizonsLORRI(oops.Host):
                 invalid. With `row_dicts`, `filter` is checked against the first row:
                 when this method is called if `row_dicts` is a sequence, such as a
                 list, and otherwise when the iteration reads the first row.
-            oops.host.HostFormatError: When the iteration reaches a row whose
-                BINNING_MODE is missing or not "1X1" or "4X4" in either case, or that
-                lacks EXPOSURE_DURATION, or lacks both START_TIME and
-                SPACECRAFT_CLOCK_START_COUNT.
+            oops.host.HostFormatError: When the iteration reaches a row that lacks
+                VOLUME_ID or FILE_SPECIFICATION_NAME, which only a row of `row_dicts` or a
+                null value can, whose BINNING_MODE is missing or not "1X1" or "4X4" in
+                either case, or that lacks EXPOSURE_DURATION, or lacks both START_TIME
+                and SPACECRAFT_CLOCK_START_COUNT.
             oops.host.HostIndexError: When this method is called, if `filepath` is in a
                 directory named "index" in either case, which is where a volume keeps its
                 own index; if `supplement` is None while `row_dicts` is not given; if
@@ -866,8 +873,9 @@ class NewHorizonsLORRI(oops.Host):
 
         Parameters:
             label (Pds3Label): The parsed label.
-            check (bool, optional): True to look for the file; False to return the first
-                spelling without looking, so that no FITS file is needed.
+            check (bool, optional): True to look for the file, which must then be named
+                with the suffix ".fit" or ".fits" in either case; False to return the
+                first spelling without looking, so that no FITS file is needed.
 
         Returns:
             FCPath: The path to the FITS file, in the label's directory.
@@ -875,7 +883,8 @@ class NewHorizonsLORRI(oops.Host):
         Raises:
             FileNotFoundError: If `check` is True and no spelling of the name exists.
             oops.host.PdsHostError: If the label has no ``^IMAGE`` pointer to a
-                separate file.
+                separate file, or if `check` is True and the name it points to does not
+                end in ".fit" or ".fits".
         """
 
         name = label.get('^IMAGE')
@@ -894,6 +903,11 @@ class NewHorizonsLORRI(oops.Host):
         parent = label_path.parent
         if not check:
             return parent / first
+
+        # oops opens a FITS file only by its suffix, which every archive product has
+        if not name.lower().endswith(('.fit', '.fits')):
+            raise oops.host.PdsHostError(f'PDS3 label points to {name}, whose name does '
+                                         f'not end in .fit or .fits: {label.filepath}')
 
         for option in dict.fromkeys([first, name, name.lower(), name.upper()]):
             path = parent / option
@@ -1024,8 +1038,7 @@ class NewHorizonsLORRI(oops.Host):
             default_frame = overrides['frame']
         elif pointing == 'spice':
             NewHorizonsLORRI._define_camera_frame()
-            NewHorizonsLORRI._check_pointing(oops.Host._pointing_time(cadence, overrides),
-                                             filepath)
+            NewHorizonsLORRI._check_pointing(cadence, overrides, filepath)
             default_frame = _SPICE_FRAME_NAME
         else:
             # Only "fitsapp" needs the epoch, to evaluate the observer's path
@@ -1106,9 +1119,10 @@ class NewHorizonsLORRI(oops.Host):
             oops.OopsSpiceError: If the row lacks START_TIME and the spacecraft clock
                 kernel cannot convert its SPACECRAFT_CLOCK_START_COUNT. Missing pointing
                 is raised only when the observation's frame is evaluated.
-            oops.host.HostFormatError: If the row's BINNING_MODE is missing or not "1X1"
-                or "4X4", or if the row lacks EXPOSURE_DURATION, or lacks both START_TIME
-                and SPACECRAFT_CLOCK_START_COUNT.
+            oops.host.HostFormatError: If the row lacks VOLUME_ID or
+                FILE_SPECIFICATION_NAME, if its BINNING_MODE is missing or not "1X1" or
+                "4X4", or if it lacks EXPOSURE_DURATION, or lacks both START_TIME and
+                SPACECRAFT_CLOCK_START_COUNT.
         """
 
         row_dict = NewHorizonsLORRI._row_as_json(row_dict)
@@ -1118,7 +1132,12 @@ class NewHorizonsLORRI(oops.Host):
         if isinstance(target_name, str) and target_name in _SUPPLEMENT_TARGET_NAMES:
             row_dict['TARGET_NAME'] = _SUPPLEMENT_TARGET_NAMES[target_name]
 
-        # The index names the label; the observation names the FITS file beside it
+        # The index names the label; the observation names the FITS file beside it. A
+        # table without either column is refused before any row is read, but a row of
+        # `row_dicts`, or a null value, can still lack one.
+        for name in _INDEX_KEYS:
+            if name not in row_dict:
+                raise oops.host.HostFormatError(f'no {name} in a LORRI index row')
         label_path = oops.Host._index_file_path(volumes, row_dict)
         stem, _, suffix = label_path.name.rpartition('.')
         fits_suffix = 'FIT' if suffix.isupper() else 'fit'
@@ -1146,8 +1165,8 @@ class NewHorizonsLORRI(oops.Host):
         default_frame = _SPICE_FRAME_NAME
         if using_cks:
             NewHorizonsLORRI._define_camera_frame()
-            default_frame = NewHorizonsLORRI._check_pointing(
-                oops.Host._pointing_time(cadence, overrides), filepath, defer=True)
+            default_frame = NewHorizonsLORRI._check_pointing(cadence, overrides, filepath,
+                                                             defer=True)
 
         target_name = NewHorizonsLORRI._target_body(items.get('TARGET_NAME'))
         params = {
@@ -1170,31 +1189,42 @@ class NewHorizonsLORRI(oops.Host):
         return obs
 
     @staticmethod
-    def _check_pointing(tdb, filepath, *, defer=False):
-        """Check that the C kernels give the pointing of the camera at a time.
+    def _check_pointing(cadence, overrides, filepath, *, defer=False):
+        """Check that the C kernels give the pointing of the camera where the observation
+        will read it.
 
-        :meth:`_define_camera_frame` must have been called first. The camera frame is
-        evaluated relative to J2000 by :meth:`oops.Host._check_spice_frame`, which
-        evaluates every frame in its chain, and so the SPICE frame beneath it. The
-        camera frame itself is a fixed rotation that never consults the kernels.
+        :meth:`_define_camera_frame` must have been called first, and the overrides must
+        not yet be applied. :meth:`oops.Host._check_spice_frame` builds the frame and the
+        time as the overrides will, and evaluates the camera frame relative to J2000,
+        which evaluates every frame in its chain, and so the SPICE frame beneath it. The
+        camera frame itself is a fixed rotation that never consults the kernels, so a
+        time shift of the frame ("F") shifts only that rotation, and the kernels are read
+        at the observation's midtime, moved by a `cadence` override and by a time shift
+        of the cadence ("T").
 
         Parameters:
-            tdb (float): The time in seconds TDB.
+            cadence (oops.cadence.Cadence): The cadence of the observation before the
+                overrides.
+            overrides (dict[str, Any]): The values of the standard overrides, as described
+                for :meth:`from_file`.
             filepath (FCPath | None): The path to the FITS file, for the message.
             defer (bool, optional): True to return a frame that raises the error when it
                 is evaluated, rather than raising it now.
 
         Returns:
             str | oops.frame.SpiceErrorFrame: The camera frame's ID, "NH_LORRI", if the
-            kernels give the pointing; otherwise, with `defer`, a SpiceErrorFrame.
+            kernels give the pointing; otherwise, with `defer`, a SpiceErrorFrame that
+            stands in for the camera frame before the overrides.
 
         Raises:
-            oops.OopsSpiceError: If `defer` is False and the kernels lack the pointing at
-                `tdb`. The message names the time and the file and ends with the SPICE
-                error code, such as "SPICE(NOFRAMECONNECT)".
+            oops.OopsSpiceError: If `defer` is False and the kernels lack the pointing.
+                The message names the time and the file and ends with the SPICE error
+                code, such as "SPICE(NOFRAMECONNECT)".
         """
 
-        return oops.Host._check_spice_frame(_SPICE_FRAME_NAME, tdb,
+        # What "F" should mean for a camera frame that is a fixed rotation over a SPICE
+        # frame is an open question, SETI/rms-oops#251; the host follows oops
+        return oops.Host._check_spice_frame(_SPICE_FRAME_NAME, cadence, overrides,
                                             description=_NO_POINTING, filepath=filepath,
                                             defer=defer)
 
