@@ -73,29 +73,33 @@ described below.
   FITS file its `^IMAGE` names (`_fits_path()`, which tries the case of the label's own
   name first), except that an astrometry read of a label reads the label alone and needs
   no FITS file (and refuses `geom` or `pointing` from the header with `OopsValueError`). The
-  path subfields always name the FITS file. The host opens FITS files itself
-  (`_open_fits()`), because `oops.Host._read_fileinfo()` leaves a FITS file of another
-  host open, and closes every HDUList once the arrays and headers are copied out of it,
-  including one passed in. Labels are parsed by `_parse_label()`, which falls back from
-  "fast" to "strict" to "loose".
+  path subfields always name the FITS file. A path is opened or parsed by
+  `oops.Host._read_fileinfo()` (`formats='PF'`, `pds3_fallback=True`): a ".fit" or
+  ".fits" path is a FITS file, closed by oops if it is not a LORRI file; a ".lbl" path,
+  or another file that begins as a PDS3 label, is parsed by the requested method and then
+  each later one of "fast", "strict" and "loose"; any other file is a WrongHostError. The
+  host closes every HDUList once the arrays and headers are copied out of it, including
+  one passed in. LORRI labels parse as they are written, so the host keeps
+  `oops.Host._correct_label_text()` as it is.
 - The metadata come from every source read. `_items_from_pds3()` and
   `_items_from_header()` give each source's items under PDS3 names (START_TIME in seconds
   TDB, the FITS start being SPCSCET - EXPTIME/2; STOPMET converted by `_sclk_from_met()`),
-  leaving out missing and null values (`_is_missing()`, `_NULL_VALUES`), and
+  leaving out missing and null values (`_is_missing()`, which calls
+  `oops.host.is_pds3_null()` and adds the FITS fill value -1e32), and
   `_merge_items()` merges them. Where both give an item, `_WINNING_SOURCE` names the one
   source, "label" or "header", whose value it takes for every image; each entry's comment
   cites the evidence and the issue that records the difference. Never add a rule that
   looks at the values of one image. The target body comes from the merged TARGET_NAME by
   the fixed translation in `_target_body()`. Every computed value (times, FOV, target)
-  comes from the merged items. Nothing missing is None: a subfield or `dict` key with no
-  value is absent, as are `error` and `quality` on a raw product. `dict` is the merged
+  comes from the merged items. A missing value is never None: a subfield or `dict` key
+  whose value is missing is absent, as are `error` and `quality` on a raw product. `dict` is the merged
   items plus every other key of each source; `label_dict`, `header_dict` and `headers`
   are the raw sources. All four, and `dict` of `from_index()`, must stay
   JSON-serializable (`_label_as_json()`, `_header_as_json()`, `_row_as_json()`). Labels
   are always parsed with `sources=False`; `label_dict` leaves out END, None values, and
   the parser's helper keys (lower-case suffixes such as `_fmt`, `_unit`, `_offset`, and
   `objects`); a repeated FITS keyword is keyed `NAME[n]` (`_header_cards()`), as the
-  VICAR hosts key a repeated parameter. If no source gives the start time, it comes from
+  VICAR hosts key a repeated parameter. If the sources lack the start time, it comes from
   SPACECRAFT_CLOCK_START_COUNT through the clock kernel (`_add_start_time_from_clock()`),
   and the `time_from_sclk` subfield, which every Snapshot has, is True.
 - By default, `calibrations` holds one `FlatCalib('I/F', ...)` when the FITS header gives
@@ -105,13 +109,15 @@ described below.
   AU from itself), a target without a path or an ephemeris, and every index row. A
   `calibrations` override replaces it in `from_file()` and `from_index()` alike.
 - With the pointing from the C kernels, `from_file()` evaluates the camera frame at
-  mid-exposure (`_check_pointing()`, which calls `oops.Host._check_spice_frame()` with
-  `defer=False`) and raises `oops.OopsSpiceError` with the SPICE error code if the
-  kernels give none. oops evaluates the frame relative to J2000, so the check reaches
-  the SPICE frame `NH_LORRI_FLIPPED` beneath the camera's Cmatrix. It does not check
-  when `frame` is given or `pointing` is not "spice". `from_index()` makes the same
-  check at each row's midtime (after the `cadence` and "T" `timeshift` overrides) with
-  `defer=True`: a row without pointing gets an `oops.frame.SpiceErrorFrame`, which
+  `oops.Host._pointing_time()`, the midtime after the `cadence` override and a "T"
+  and/or "F" `timeshift` (`_check_pointing()`, which calls
+  `oops.Host._check_spice_frame()` with `defer=False`), and raises
+  `oops.OopsSpiceError` with the SPICE error code if the kernels give none. oops
+  evaluates the frame relative to J2000, so the check reaches the SPICE frame
+  `NH_LORRI_FLIPPED` beneath the camera's Cmatrix. It does not check when `frame` is
+  given or `pointing` is not "spice". `from_index()` makes the same check at each row's
+  `_pointing_time()` with `defer=True`: a row without pointing gets an
+  `oops.frame.SpiceErrorFrame`, which
   raises `oops.OopsSpiceError` when it is evaluated, so that one image without pointing
   does not stop the whole index. In the tests, the fake SPICE frame is a class of its
   own (`FakeSpiceFrame` in `tests/oops/conftest.py`), so that a test can take its data
@@ -120,14 +126,19 @@ described below.
   (`oops.Host._check_select()`, `OopsValueError`) and any keyword they do not take
   (`oops.Host._check_keywords()`, `OopsTypeError`) at call time. `abspath` is given only
   for a file that exists locally or in the cache, by `oops.Host._apply_overrides()`; the
-  host has no path code of its own, and no read creates a directory. Parsed content that
+  host has no path code of its own (each row's file is `oops.Host._index_file_path()`
+  with the FITS suffix), and reading never creates a directory. Parsed content that
   was not read from a file has no path subfields; a full read of such a Pds3Label raises
   `HostFormatError`.
-- `from_index()` reads the index through `oops.Host._index_rows()` and nothing else
+- `from_index()` reads the index through `oops.Host._index_rows()`, the only code that
   reads a table. The call reads only the two labels; the iteration reads both tables a
   few rows at a time (pdstable's `iter_dicts`) and builds each row's Snapshot when it
-  reaches the row, so memory does not grow with the index. It is not a generator
-  function, which would defer the argument and label errors to the first `next()`.
+  reaches the row, so memory stays the same however long the index is: peak RSS 163 MB
+  over the 1,119 rows of NHJULO_1001 and 166 MB over the 21,753 rows of NHxxLO_1999, and
+  166 MB over the 9,641 rows of NHKELO_2001, every one of which gets a SpiceErrorFrame
+  (2026-11-19, rms-oops 191800d, whose frame cache keeps only registered frames). It is
+  not a generator function, which would defer the argument and label errors to the
+  first `next()`.
   `supplement` defaults to `oops.Host.SUPPLEMENT` (the one beside the index, which must
   then exist), and None raises `HostIndexError` unless `row_dicts` is given.
   `METADATA_INDEX_EXAMPLE` makes oops refuse an index in a directory named "index" (a
@@ -136,16 +147,19 @@ described below.
   `oops.Host._volumes_directory()` of the index's location.
 - `MERGE_SUPPLEMENT_BY_FILE` is True: rows are paired by `VOLUME_ID` and
   `FILE_SPECIFICATION_NAME` (`file_key=_INDEX_KEYS`), because the NHJULO_1001 index, and
-  so NHxxLO_1999, lists `lor_0035089864_0x632_eng` last instead of at row 678, where the
-  sorted supplement has it. The other 14 of the 16 metadata indexes are in step, and
-  pairing by file gives them the same rows. Only those two columns are compared
-  (`validate=_INDEX_KEYS`), and the supplement wins every shared column
+  so NHxxLO_1999, lists `lor_0035089864_0x632_eng` out of place, last, instead of at row
+  679 (counting from 1), where the supplement, which is in file order, has it. The other
+  14 of the 16 metadata indexes are in step, and pairing by file gives them the same
+  rows. oops would choose the same key, but the explicit key makes it refuse a table
+  without VOLUME_ID at call time instead of pairing by FILE_SPECIFICATION_NAME alone.
+  Only the file key is compared (`validate=()`), and the supplement wins every shared column
   (`prefer_supplement=True`; the index gives clock counts with a partition, rounds the
   stop count differently, gives PRODUCT_CREATION_TIME as a date alone, and shortens some
   TARGET_NAMEs). The supplement is not the label either: it rounds EXPOSURE_DURATION to
   the millisecond and drops some SEQUENCE_ID prefixes.
 - The index files can be corrected, unlike the product labels; their problems are listed
-  in SETI/rms-data-projects#262. Every workaround for one must still give the right
+  in one issue in SETI/rms-data-projects, which the `#` comment beside each workaround
+  cites by number and item. Every workaround for one must still give the right
   answer on a corrected table: pairing by file works in any order; `_row_as_json()`
   treats zeros specially only where the reader masks them as the declared null constant
   (see the comment at `_TARGET_GEOMETRY`), and `_VECTOR_COMPONENT` accepts QUATERNION as
@@ -166,7 +180,7 @@ described below.
 
 ## Repo etiquette
 
-- Commit subjects are a plain, capitalized, imperative sentence with no type prefix and no
+- Commit subjects are a plain, capitalized, imperative sentence without a type prefix or a
   trailing period. PRs are squash-merged onto `main`.
 - Branch names: `<initials>_<YYMMDD>_<topic>`.
 - Versions come from `setuptools_scm`; never hand-write a version.
