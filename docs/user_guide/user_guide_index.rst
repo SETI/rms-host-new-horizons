@@ -11,7 +11,9 @@ It returns an iterator, which gives the Snapshots row by row, in the order of th
 The call itself checks the arguments and reads the index, so a wrong argument or an index
 that cannot be read raises an error at once. Each row's Snapshot is built only when the
 iteration reaches that row, so an error in a row is raised there, after the rows before
-it. To build every row at once, pass the iterator to ``list()``:
+it. The iteration ends at that row: the rows after it are not built. The ``filter``
+argument, described below, can leave such a row out. To build every row at once, pass
+the iterator to ``list()``:
 
 .. code-block:: python
 
@@ -31,10 +33,17 @@ PDS3 index, such as ``NHJULO_2001_index.lbl``, with one row per image, and a
 supplemental index, ``NHJULO_2001_supplemental_index.lbl``, whose rows give further
 values for the same images. The host needs both. Each row of the supplement is
 merged into the matching row of the index; where both tables give a column, the
-supplement's value is kept, because the supplement writes each value as the product's
-label does. The index writes some of them differently: it gives each clock count with
-its partition, as in ``1/0030598438:48850``, writes the product creation time as a date
-alone, and shortens some target names.
+supplement's value is kept, because it is closer to the product's label. The index
+gives each clock count with its partition, as in ``1/0030598438:48850``, rounds the stop
+count differently, writes the product creation time as a date alone, and shortens some
+target names, such as ``50000 QUAOAR (2002 LM)``.
+
+The supplement does not match the product labels everywhere either. It gives the
+exposure duration rounded to the millisecond, such as 0.501 s where the label gives
+0.5006 s. It leaves out the number and colon at the start of some sequence IDs. And it
+gives the target names of five moons of Jupiter, Io, Europa, Himalia, Elara, and
+Callirrhoe, without the ``J1``, ``J2``, ``J6``, ``J7``, or ``J17`` that their labels put
+in front, as in ``IO`` for ``J1 IO``.
 
 The ``supplement`` argument chooses the supplemental index:
 
@@ -67,7 +76,8 @@ Other arguments
 ``filter``
     A dictionary of column names and the values to keep. A row is kept when each column
     equals its value, is one of a set of values, or falls in a range given as a tuple of
-    two values.
+    two values. A row without one of the columns is left out, and a column that no row
+    has raises :exc:`~oops.OopsValueError`.
 
 ``select``
     Must be None. Each row is one image, so there is nothing to select, and any other
@@ -96,14 +106,19 @@ out only when all of its components are zero.
 The subfields are those of an image read from its label (see
 :doc:`user_guide_metadata`), except ``data``, ``error``, ``quality``, ``label_dict``,
 ``header_dict``, and ``headers``. The binning mode comes from the ``BINNING_MODE``
-column. By default the pointing comes from the C kernels and the position from the
-SPICE ephemerides, and the ``frame`` and ``path`` overrides replace them. A row has no
-default I/F calibration, because it gives no RSOLAR, but the ``calibrations`` override
-supplies one.
+column, and the exposure from the supplement's ``EXPOSURE_DURATION``, which is rounded to
+the millisecond. The target comes from ``TARGET_NAME`` as for a label (see
+:doc:`user_guide_geometry`). For the five moons of Jupiter that the supplement lists
+without their number, ``label_target`` is the supplement's name, such as ``IO``, and the
+target is the same as from the label. By default the pointing comes from the C kernels
+and the position from the SPICE ephemerides, and the ``frame`` and ``path`` overrides
+replace them. A row has no default I/F calibration, because it gives no RSOLAR, but the
+``calibrations`` override supplies one.
 
-The host does not check the C kernels for the pointing of an index row. If the kernels
-hold no pointing for an image, its row still gives a Snapshot, and the error appears
-only when the Snapshot's frame is evaluated.
+The host looks up the pointing of each row at the middle of its exposure, but a row
+whose pointing the C kernels do not hold still gives a Snapshot. Its frame raises
+:exc:`oops.OopsSpiceError` when it is evaluated, so one image without pointing does not
+stop the rest of the index.
 
 File paths
 ==========
@@ -113,20 +128,25 @@ refers to the FITS file, with ``.fit`` in place of the label's suffix, in the sa
 ``filepath``, ``basename``, and ``image_url`` give it as a full path or URL, formed from
 the location of the index:
 
-- For an index in a volume's ``INDEX`` directory, the volume directories are those
-  beside the volume that holds it.
 - For an index in the ``metadata`` tree of the Ring-Moon Systems Node holdings, such as
-  ``.../metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl``, they are in the
-  matching ``volumes`` tree, ``.../volumes/NHxxLO_xxxx``.
+  ``.../metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl``, the volume
+  directories are in the matching ``volumes`` tree, ``.../volumes/NHxxLO_xxxx``.
 - For an index anywhere else, they are in the index's own directory.
 
 The row's ``VOLUME_ID`` and file specification complete the path. ``abspath`` is present
-only when the FITS file is local or already in the local cache.
+only when the FITS file exists locally or is already in the local cache. Building the
+Snapshots creates no directories.
+
+A volume's own index, in its ``INDEX`` directory, gives the path of each image in other
+columns and has no supplement, so the host does not read it. Passing an index from a
+directory named ``INDEX``, in any case, raises :exc:`~oops.host.HostIndexError` at once;
+use the volume's index in the ``metadata`` tree instead.
 
 Reading an index through oops.Host
 ==================================
 
 :meth:`oops.host.Host.from_index` recognizes a LORRI index from its label and passes it,
-with its other arguments, to
-:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index`, so the two give the
-same Snapshots.
+with every other argument, to
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index`, which reads the index
+and its supplement itself. The two calls give the same Snapshots and raise the same
+errors.

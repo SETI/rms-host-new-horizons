@@ -12,8 +12,9 @@ the start is ``SPCSCET``, the middle of the exposure in seconds TDB, less half o
 the header's value is used when both are read (see :doc:`user_guide_metadata`).
 
 If no label read gives a start time, the host converts
-``SPACECRAFT_CLOCK_START_COUNT`` to a time with the SPICE clock kernel. An image cannot
-be read if it has neither a start time nor a clock count (see :doc:`user_guide_errors`).
+``SPACECRAFT_CLOCK_START_COUNT`` to a time with the SPICE clock kernel, and the
+``time_from_sclk`` subfield is True. An image cannot be read if it has neither a start
+time nor a clock count (see :doc:`user_guide_errors`).
 
 Pointing
 ========
@@ -28,6 +29,9 @@ When :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` builds the
 from the C kernels, it checks at once that they hold the pointing at the middle of the
 exposure, after any ``cadence`` or ``timeshift`` override. If they do not, it raises
 :exc:`oops.OopsSpiceError` (see :doc:`user_guide_errors`).
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` looks the pointing up
+in the same way but raises nothing: a row without pointing still gives a Snapshot, and
+its frame raises :exc:`oops.OopsSpiceError` when it is evaluated.
 
 The pointing can also come from the FITS header, with the ``pointing`` option (see
 :doc:`user_guide_files`), and the spacecraft's position likewise with the ``geom``

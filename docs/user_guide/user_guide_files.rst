@@ -18,9 +18,10 @@ product, the FITS file or its PDS3 label:
 What is read
 ============
 
-What the host reads depends on the file it is given and on the ``astrometry`` option.
-An astrometry read is for work that needs only the image's time and geometry, so it
-reads no image array.
+A path that ends in ``.fit`` or ``.fits``, in any case, is read as a FITS file, and any
+other path as a PDS3 label. What the host reads depends on the file it is given and on
+the ``astrometry`` option. An astrometry read is for work that needs only the image's
+time and geometry, so it reads no image array.
 
 .. list-table::
    :header-rows: 1
@@ -51,23 +52,29 @@ label's ``^IMAGE`` pointer gives. The archive spells the FITS file's name in the
 case as the label's, so the host tries that case first, then the name as the label
 spells it, then the name in lower case, and last in upper case. An astrometry read does
 not look for the file, so its path subfields give the name in the case of the label's
-own name. A path that ends in
-``.fit`` or ``.fits``, in any case, is read as a FITS file, and any other path as a PDS3
-label.
+own name.
 
 The ``filepath``, ``basename``, ``abspath``, and ``image_url`` subfields always give the
-FITS file, also when the input is the label. After an astrometry read of a remote
-label, the FITS file has not been retrieved, so ``abspath`` is absent unless an earlier
-read put the file in the local cache.
+FITS file, also when the input is the label. ``abspath`` is the file's local path, and
+it is present only when that file exists: a local file, or a remote one that a read has
+put in the local cache. After an astrometry read of a remote label, the FITS file has
+not been retrieved, so ``abspath`` is absent unless an earlier read put the file in the
+cache.
 
 Parsed input
 ============
 
 A label or FITS file that has already been opened can be passed in its place: a
 :class:`~pdsparser.Pds3Label` is read as a PDS3 label, and an
-:class:`~astropy.io.fits.HDUList` as the FITS file. Either must have been read from a
-file, because the path subfields need the file's location. The host closes an
+:class:`~astropy.io.fits.HDUList` as the FITS file. The host closes an
 :class:`~astropy.io.fits.HDUList` once it has copied out the headers and arrays.
+
+A label or FITS file parsed from text or built in memory, rather than read from a file,
+has no location, so the Snapshot has no ``filepath``, ``basename``, ``abspath``, or
+``image_url``. An :class:`~astropy.io.fits.HDUList` of that kind holds everything the
+host needs. A :class:`~pdsparser.Pds3Label` of that kind can be read with
+``astrometry=True``, but a normal read raises :exc:`~oops.host.HostFormatError`,
+because the host cannot find the FITS file beside a label that has no file path.
 
 Options
 =======
@@ -103,8 +110,22 @@ These options are particular to the New Horizons host:
 ``astrometry``
     True for an astrometry read, as described above.
 
+``select``
+    Must be None. Each file holds one image, so there is nothing to select, and any
+    other value raises :exc:`~oops.OopsValueError`.
+
 The standard OOPS overrides, ``target``, ``lightsource``, ``path``, ``frame``,
 ``cadence``, ``fov``, ``calibrations``, ``timeshift``, ``navigation``, ``tracker``, and
 ``parallel``, replace what the host would otherwise build. They are listed with
-:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`. Any other keyword is
-accepted and ignored.
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`. Any other keyword
+raises :exc:`~oops.OopsTypeError`, so that a misspelled argument is not silently
+ignored.
+
+Reading a label through oops.Host
+=================================
+
+:meth:`oops.host.Host.from_file` recognizes a LORRI image from its PDS3 label or its
+FITS header and passes the path, with every other argument, to
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`. The host then parses
+the label itself, trying the fast, strict, and loose methods in turn, so the two calls
+read the same labels and give the same Snapshot, I/F calibration included.

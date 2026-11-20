@@ -65,8 +65,9 @@ defines the camera's fields of view. To choose the bodies that OOPS defines, to 
 the kernels that existed before a given date, or to furnish a metakernel instead of the
 kernels chosen from the database, call
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` before opening the
-first image. This call defines Jupiter and Pluto, planets 5 and 9, and their moons, and
-no other planet:
+first image. Its ``planets`` option takes one planet number, from 1 to 9, or a sequence
+of them. This call defines Jupiter and Pluto, planets 5 and 9, and their moons, and no
+other planet:
 
 .. code-block:: python
 

@@ -52,7 +52,7 @@ from the same label, for every image:
      - The label gives the start time rounded to the millisecond. The header's start
        agrees to 0.0001 ms with the time of the label's own clock count. On an image
        taken while the spacecraft was spinning, the rounding can move the pointing by
-       as much as 37 pixels.
+       as much as 48.7 pixels.
    * - ``EXPOSURE_DURATION``
      - FITS header
      - The two differ only in the last binary digit, and the header's value keeps the
@@ -83,7 +83,7 @@ for it, and never a None or a placeholder in its place. These count as no value:
   or a file it does not give, all compared in any case;
 - the FITS header's fill value -1e32, which it writes for a value its pipeline cannot
   compute, such as the target geometry of an image that has no target;
-- a list of nothing else.
+- a list whose elements all count as no value.
 
 A list in the PDS3 label with some missing elements among others is a vector, such as
 ``SC_TARGET_POSITION_VECTOR``, in which each position has a meaning. In ``dict`` it
@@ -141,6 +141,9 @@ Snapshot has these subfields. One whose item no label gives is absent.
    * - ``spacecraft_clock_start_count``, ``spacecraft_clock_stop_count``
      - ``SPACECRAFT_CLOCK_START_COUNT`` and ``SPACECRAFT_CLOCK_STOP_COUNT``, described
        below.
+   * - ``time_from_sclk``
+     - True if no label read gives a start time, so that the time comes from the clock
+       count (see :doc:`user_guide_geometry`); False otherwise.
    * - ``error``, ``quality``
      - The error estimates and quality flags of a calibrated image, except in an
        astrometry read (see :doc:`user_guide_products`).
@@ -151,7 +154,8 @@ Snapshot has these subfields. One whose item no label gives is absent.
        to the camera frame, which reverses its *y* and *z* axes (see
        :doc:`user_guide_geometry`).
    * - ``filepath``, ``basename``, ``abspath``, ``image_url``
-     - The FITS file (see :doc:`user_guide_files`).
+     - The FITS file, absent for a parsed label or FITS file that was not read from a
+       file (see :doc:`user_guide_files`).
 
 The spacecraft clock counts
 ===========================

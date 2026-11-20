@@ -49,7 +49,9 @@ described below.
   to Codecov and fails if the upload fails. The upload authenticates through GitHub OIDC
   (`use_oidc`), so it needs no `CODECOV_TOKEN` secret.
 - Tests never touch SPICE kernels or spicedb. `tests/oops/conftest.py` replaces them with
-  fakes for every test, so new tests get this automatically. Synthetic FITS files and
+  fakes for every test, so new tests get this automatically. Each test also gets its own
+  empty file cache under `tmp_path` (the `file_cache` fixture), so whether a remote file
+  counts as cached never depends on the shared cache. Synthetic FITS files and
   labels are written with `write_fits()` and `write_label()` there. `test_files/` holds
   cut-down archive products, described in `tests/oops/test_lorri_files.py`.
 
@@ -94,7 +96,8 @@ described below.
   the parser's helper keys (lower-case suffixes such as `_fmt`, `_unit`, `_offset`, and
   `objects`); a repeated FITS keyword is keyed `NAME[n]` (`_header_cards()`), as the
   VICAR hosts key a repeated parameter. If no source gives the start time, it comes from
-  SPACECRAFT_CLOCK_START_COUNT through the clock kernel (`_add_start_time_from_clock()`).
+  SPACECRAFT_CLOCK_START_COUNT through the clock kernel (`_add_start_time_from_clock()`),
+  and the `time_from_sclk` subfield, which every Snapshot has, is True.
 - By default, `calibrations` holds one `FlatCalib('I/F', ...)` when the FITS header gives
   RSOLAR (a calibrated product): pi r^2 / (texp RSOLAR 176), r the target's solar range
   in AU from the SP kernels at the Snapshot's midtime (`_iof_calibrations()`). The
@@ -104,15 +107,25 @@ described below.
 - With the pointing from the C kernels, `from_file()` evaluates the camera frame at
   mid-exposure (`_check_pointing()`) and raises `oops.OopsSpiceError` with the SPICE error
   code if the kernels give none; it catches only the classes cspyce raises. It does not
-  check when `frame` is given or `pointing` is not "spice", and `from_index()` never
-  checks, so that one image without pointing does not stop the whole index.
+  check when `frame` is given or `pointing` is not "spice". `from_index()` makes the
+  same check at each row's midtime but raises nothing: a row without pointing gets a
+  `_NoPointingFrame`, the same class as Voyager's, which raises `oops.OopsSpiceError`
+  when it is evaluated, so that one image without pointing does not stop the whole index.
+- `from_file()` and `from_index()` both refuse a `select` other than None
+  (`OopsValueError`) and any keyword they do not take (`OopsTypeError`) at call time
+  (`_check_arguments()`). `abspath` is given only for a file that exists locally or in
+  the cache (`get_local_path(create_parents=False)` in `_apply_overrides_and_paths()`),
+  and no read creates a directory. Parsed content that was not read from a file has no
+  path subfields; a full read of such a Pds3Label raises `HostFormatError`.
 - `from_index()` follows the shared contract: `supplement` defaults to
   `oops.Host.SUPPLEMENT` (the one beside the index, which must then exist), and None
-  raises `HostIndexError` unless `row_dicts` is given; `label=` is passed to
-  `_read_index_rows()`; `select` other than None raises `OopsValueError`; any other
-  keyword raises `OopsTypeError`. Each row's path subfields name the FITS file in full,
-  from `_volumes_directory()` of the index's location, with `abspath` only when the file
-  is local or cached. `_row_as_json()` does not apply the table reader's masks as they
+  raises `HostIndexError` unless `row_dicts` is given; an index in a directory named
+  INDEX (a volume's own index, which has no FILE_SPECIFICATION_NAME and no supplement)
+  raises `HostIndexError` before anything is read; `label=` is passed to
+  `_read_index_rows()`. Each row's path subfields name the FITS file in full, from
+  `_volumes_directory()` of the index's location: the matching `volumes` tree for an
+  index in a `metadata` tree, otherwise the index's own directory, as in the other
+  hosts. `_row_as_json()` does not apply the table reader's masks as they
   are, because the supplements declare zero as the null constant of vectors where a zero
   can be real (see the comment at `_TARGET_GEOMETRY`). Given
   `row_dicts`, it reads neither table. `oops.Host._read_index_rows()` pairs the rows by
@@ -120,10 +133,13 @@ described below.
   `VOLUME_ID` and `FILE_SPECIFICATION_NAME` (`file_key=_INDEX_KEYS`; the NHJULO_1001
   index lists `lor_0035089864_0x632_eng` last instead of at row 678, where the sorted
   supplement has it, and NHxxLO_1999 departs from its supplement's order at row 1924).
-  It checks only those two columns (`validate=_INDEX_KEYS`), and the supplement, which
-  follows the labels, wins every shared column (`prefer_supplement=True`; the index gives
-  clock counts with a partition, rounds the stop count differently, gives
-  PRODUCT_CREATION_TIME as a date alone, and shortens some TARGET_NAMEs).
+  It checks only those two columns (`validate=_INDEX_KEYS`), and the supplement wins
+  every shared column (`prefer_supplement=True`; the index gives clock counts with a
+  partition, rounds the stop count differently, gives PRODUCT_CREATION_TIME as a date
+  alone, and shortens some TARGET_NAMEs). The supplement is not the label either: it
+  rounds EXPOSURE_DURATION to the millisecond, drops some SEQUENCE_ID prefixes, and names
+  five Jupiter moons without "J<n> ", so an index row's `label_target` can differ from
+  the label's while the target body is the same.
   `oops.Host.from_index()` identifies the host from the index label and passes the call
   to `from_index()`, which reads the rows.
 - `from_index()` returns an iterator. It checks its arguments and reads and filters the
