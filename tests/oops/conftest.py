@@ -264,8 +264,9 @@ def fake_spice(monkeypatch: pytest.MonkeyPatch) -> FakeSpice:
 
     Kernel-reading calls are replaced: `cspyce.bodn2c` looks names up in
     :data:`BODY_IDS`, a SpicePath becomes a FixedPath at the origin, and a SpiceFrame
-    becomes an identity Cmatrix on J2000. The Path and Frame registries are copied so that
-    paths and frames registered by one test never reach another.
+    becomes an identity Cmatrix on J2000. The Path and Frame registries, caches, and
+    waypoint and wayframe pools are copied so that paths and frames made by one test never
+    reach another.
     """
 
     fake = FakeSpice()
@@ -298,6 +299,17 @@ def fake_spice(monkeypatch: pytest.MonkeyPatch) -> FakeSpice:
     monkeypatch.setattr(oops.Path, '_PATH_CACHE', dict(oops.Path._PATH_CACHE))
     monkeypatch.setattr(oops.Frame, '_FRAME_REGISTRY', dict(oops.Frame._FRAME_REGISTRY))
     monkeypatch.setattr(oops.Frame, '_FRAME_CACHE', dict(oops.Frame._FRAME_CACHE))
+
+    # A path or frame defined as an earlier one was shares its waypoint or wayframe, and
+    # so its ID, so each class's pool is copied too; otherwise a fixed SUN path made by
+    # one test would be the NEW HORIZONS path of the next, both being fixed at the origin
+    for path_class in oops.Path._PATH_SUBCLASSES:
+        if '_WAYPOINTS' in vars(path_class):
+            monkeypatch.setattr(path_class, '_WAYPOINTS', dict(path_class._WAYPOINTS))
+    for frame_class in oops.Frame._FRAME_SUBCLASSES:
+        for pool in ('_WAYFRAMES', '_FOR_NAME', '_FRAME_LOOKUP'):
+            if pool in vars(frame_class):
+                monkeypatch.setattr(frame_class, pool, dict(getattr(frame_class, pool)))
     return fake
 
 
