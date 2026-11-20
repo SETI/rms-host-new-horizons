@@ -58,10 +58,9 @@ Reading a PDS3 index
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` raises:
 
 :exc:`~oops.host.HostIndexError`
-    Raised by the call itself: the index is a volume's own index, in a directory named
-    ``INDEX``; ``supplement`` is None and ``row_dicts`` is not given; the index's file
-    name holds no ``_index`` from which to find the supplement; or either label does not
-    describe an index table with the columns ``VOLUME_ID`` and
+    Raised by the call itself: ``supplement`` is None and ``row_dicts`` is not given; the
+    index's file name holds no ``_index`` from which to find the supplement; or either
+    label does not describe an index table with the columns ``VOLUME_ID`` and
     ``FILE_SPECIFICATION_NAME``. Raised during the iteration: after the last row of a
     table file that holds fewer rows than its label says; for a row longer than its
     label's row length, at the first of the ten rows read with it, so those ten rows

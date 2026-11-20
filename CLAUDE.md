@@ -145,9 +145,8 @@ described below.
   first `next()`.
   `supplement` defaults to `oops.Host.SUPPLEMENT` (the one beside the index, which must
   then exist), and None raises `HostIndexError` unless `row_dicts` is given.
-  `METADATA_INDEX_EXAMPLE` makes oops refuse an index in a directory named "index" (a
-  volume's own index, which has no FILE_SPECIFICATION_NAME and no supplement) before
-  anything is read. Each row's path subfields name the FITS file in full, under
+  The host reads the Ring-Moon Systems Node metadata indexes and their supplements.
+  Each row's path subfields name the FITS file in full, under
   `oops.Host._volumes_directory()` of the index's location.
 - `MERGE_SUPPLEMENT_BY_FILE` is True: rows are paired by `VOLUME_ID` and
   `FILE_SPECIFICATION_NAME` (`file_key=_INDEX_KEYS`), because the NHJULO_1001 index

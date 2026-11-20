@@ -35,8 +35,9 @@ The index and its supplement
 The metadata tree of the Ring-Moon Systems Node holdings has, for each LORRI volume, a
 PDS3 index, such as ``NHJULO_2001_index.lbl``, with one row per image, and a
 supplemental index, ``NHJULO_2001_supplemental_index.lbl``, whose rows give further
-values for the same images. The host needs both. Each row of the supplement is
-merged into the matching row of the index; where both tables give a column, the
+values for the same images. ``from_index()`` reads such a metadata index and its
+supplement, and the host needs both. Each row of the supplement is merged into the
+matching row of the index; where both tables give a column, the
 supplement's value is kept, because it is closer to the product's label. The index
 gives each clock count with its partition, as in ``1/0030598438:48850``, rounds the stop
 count differently, writes the product creation time as a date alone, and shortens some
@@ -161,11 +162,6 @@ the location of the index:
 The row's ``VOLUME_ID`` and file specification complete the path. ``abspath`` is present
 only when the FITS file exists locally or is already in the local cache. Building the
 Snapshots leaves the file system as it was: it does not create directories.
-
-A volume's own index, in its ``INDEX`` directory, gives the path of each image in other
-columns and has no supplement, so the host does not read it. Passing an index from a
-directory named ``INDEX``, in any case, raises :exc:`~oops.host.HostIndexError` at once;
-use the volume's index in the ``metadata`` tree instead.
 
 Reading an index through oops.Host
 ==================================

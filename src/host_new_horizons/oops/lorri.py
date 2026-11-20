@@ -301,9 +301,6 @@ class NewHorizonsLORRI(oops.Host):
     # corrected. SETI/rms-data-projects#262 item 1
     MERGE_SUPPLEMENT_BY_FILE = True
 
-    # A volume's own index has no supplement and gives its files in its own way
-    METADATA_INDEX_EXAMPLE = 'NHJULO_2001_index.lbl'
-
     _INSTRUMENT_KERNEL = None
     _FOVS = {}
     _initialized = False
@@ -628,11 +625,11 @@ class NewHorizonsLORRI(oops.Host):
                    **kwargs):
         """An iterator over Snapshots, one for each row of a New Horizons LORRI index.
 
-        When this method is called, it checks the arguments and reads only the labels of
-        the index and the supplement. The iteration then reads the two tables a few rows
-        at a time, through ``oops.Host._index_rows()``, and builds each row's Snapshot
-        when it reaches that row, so the memory used stays the same however long the
-        index is.
+        It reads a Ring-Moon Systems Node metadata index and its supplement. When this
+        method is called, it checks the arguments and reads only the labels of the index
+        and the supplement. The iteration then reads the two tables a few rows at a time,
+        through ``oops.Host._index_rows()``, and builds each row's Snapshot when it
+        reaches that row, so the memory used stays the same however long the index is.
 
         Each index row is paired with the supplement row that gives the same VOLUME_ID
         and FILE_SPECIFICATION_NAME (:attr:`MERGE_SUPPLEMENT_BY_FILE` is True), because
@@ -772,12 +769,11 @@ class NewHorizonsLORRI(oops.Host):
                 null value can, whose BINNING_MODE is missing or not "1X1" or "4X4" in
                 either case, or that lacks EXPOSURE_DURATION, or lacks both START_TIME
                 and SPACECRAFT_CLOCK_START_COUNT.
-            oops.host.HostIndexError: When this method is called, if `filepath` is in a
-                directory named "index" in either case, which is where a volume keeps its
-                own index; if `supplement` is None while `row_dicts` is not given; if
-                `supplement` is `oops.Host.SUPPLEMENT` and the name of `filepath` lacks
-                "_index"; or if either label does not describe an index table with the
-                columns VOLUME_ID and FILE_SPECIFICATION_NAME. During the iteration:
+            oops.host.HostIndexError: When this method is called, if `supplement` is None
+                while `row_dicts` is not given; if `supplement` is `oops.Host.SUPPLEMENT`
+                and the name of `filepath` lacks "_index"; or if either label does not
+                describe an index table with the columns VOLUME_ID and
+                FILE_SPECIFICATION_NAME. During the iteration:
                 after the last row that a table file holds, if it holds fewer rows than
                 its label says; for a row longer than the label's row length, when the
                 iteration reaches the first of the ten rows read with it, so those ten

@@ -1351,18 +1351,6 @@ def test_from_index_remote_image_in_the_cache_has_abspath() -> None:
     assert obs.abspath == cached.resolve()
 
 
-
-# A volume's own index lives in its INDEX directory, in either case
-@pytest.mark.parametrize('index', ['/h/volumes/NHxxLO_xxxx/NHK2LO_1001/index/index.lbl',
-                                   '/h/NHK2LO_1001/INDEX/INDEX.LBL'])
-def test_from_index_refuses_a_volume_index(index: str) -> None:
-    with pytest.raises(oops.host.HostIndexError,
-                       match=r'New Horizons LORRI reads the Ring-Moon Systems Node '
-                             r'metadata index, such as "NHJULO_2001_index\.lbl", not a '
-                             r"volume's own index: .*(index|INDEX)\.(lbl|LBL)$"):
-        NewHorizonsLORRI.from_index(index, row_dicts=[row()])
-
-
 # The supplement is required, so None is refused rather than taken as "search for it"
 def test_from_index_refuses_no_supplement() -> None:
     with pytest.raises(oops.host.HostIndexError,

@@ -60,13 +60,13 @@ class NewHorizonsLORRI(Host):
         timeshift: tuple[float, str] | None = None,
         navigation: tuple[float, ...] | None = None, tracker: str | None = None,
         parallel: Observation | None = None, **kwargs: Any) -> Snapshot: ...
-    # Every row is one Snapshot. supplement=None without row_dicts raises
-    # oops.host.HostIndexError, a select other than None raises oops.OopsValueError, and
-    # any keyword not listed raises oops.OopsTypeError. The call reads only the labels;
-    # the iterator reads the index and its supplement a few rows at a time, pairs each
-    # index row with the supplement row of the same file, and builds each row's Snapshot
-    # when it reaches the row. An index in a volume's own INDEX directory raises
-    # oops.host.HostIndexError at call time.
+    # Every row is one Snapshot of a Ring-Moon Systems Node metadata index, read with its
+    # supplement. supplement=None without row_dicts raises oops.host.HostIndexError, a
+    # select other than None raises oops.OopsValueError, and any keyword not listed
+    # raises oops.OopsTypeError. The call reads only the labels; the iterator reads the
+    # index and its supplement a few rows at a time, pairs each index row with the
+    # supplement row of the same file, and builds each row's Snapshot when it reaches
+    # the row.
     @staticmethod
     def from_index(
         filepath: str | pathlib.Path | FCPath, *,
