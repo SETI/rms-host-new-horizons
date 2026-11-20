@@ -230,6 +230,25 @@ _SPICEDB_FUNCTIONS = ('open_db', 'close_db', 'furnish_lsk', 'furnish_pck', 'furn
                       'furnish_kernels', 'as_dict', 'as_names', 'used_basenames')
 
 
+class FakeSpiceFrame(oops.Frame):
+    """A stand-in for a SpiceFrame: the identity rotation from J2000.
+
+    It is a class of its own, so that a test can make this frame alone lack SPICE data,
+    by replacing its `transform_at_time`, and leave every other frame working, including
+    the camera's Cmatrix above it.
+    """
+
+    def __init__(self, frame_id: str) -> None:
+        self._reference = oops.Frame.J2000
+        self._origin = None
+        self._shape = ()
+        self._register(frame_id)
+
+    def transform_at_time(self, time: Any, *, quick: Any = None) -> oops.Transform:
+        return oops.Transform(oops.Matrix3.IDENTITY, oops.Vector3.ZERO, self._wayframe,
+                              self._reference)
+
+
 @dataclass
 class FakeSpice:
     """Records the oops calls that would otherwise read SPICE kernels.
@@ -264,7 +283,7 @@ def fake_spice(monkeypatch: pytest.MonkeyPatch) -> FakeSpice:
 
     Kernel-reading calls are replaced: `cspyce.bodn2c` looks names up in
     :data:`BODY_IDS`, a SpicePath becomes a FixedPath at the origin, and a SpiceFrame
-    becomes an identity Cmatrix on J2000. The Path and Frame registries, caches, and
+    becomes a :class:`FakeSpiceFrame`. The Path and Frame registries, caches, and
     waypoint and wayframe pools are copied so that paths and frames made by one test never
     reach another.
     """
@@ -281,8 +300,7 @@ def fake_spice(monkeypatch: pytest.MonkeyPatch) -> FakeSpice:
 
     def spice_frame(spice_frame: str, *, frame_id: str) -> oops.Frame:
         fake.spice_frames.append((spice_frame, frame_id))
-        return oops.frame.Cmatrix(oops.Matrix3.IDENTITY, oops.Frame.J2000,
-                                  frame_id=frame_id)
+        return FakeSpiceFrame(frame_id)
 
     def bodn2c(name: str) -> int:
         if name not in BODY_IDS:

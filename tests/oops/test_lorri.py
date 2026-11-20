@@ -473,7 +473,7 @@ def test_image_of_the_sun_has_no_calibration(tmp_path: pathlib.Path,
     assert obs.calibrations == []
 
 
-# The target's solar range cannot be found for no target, or for one with no path
+# The target's solar range cannot be found for a missing target, or for one without a path
 @pytest.mark.parametrize('target', ['---', 'CALLIRRHOE'])
 def test_target_without_a_path_has_no_calibration(tmp_path: pathlib.Path,
                                                   sun_path: oops.Path,
@@ -886,7 +886,8 @@ def test_from_file_label_with_a_missing_fits_file(tmp_path: pathlib.Path) -> Non
 def test_from_file_label_without_an_image(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', None)
     with pytest.raises(oops.host.PdsHostError,
-                       match=r'PDS3 label names no FITS file: .*lor_test\.lbl'):
+                       match=r'PDS3 label lacks an \^IMAGE pointer to a FITS file: '
+                             r'.*lor_test\.lbl'):
         NewHorizonsLORRI.from_file(label)
 
 
@@ -1109,54 +1110,89 @@ def test_from_index_rejects_another_host(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_index(index)
 
 
-def test_from_index_rejects_a_mismatched_supplement(tmp_path: pathlib.Path) -> None:
-    index = copy_index(tmp_path)
-    table = tmp_path / 'NHJULO_2001_supplemental_index_edited.tab'
-    content = table.read_bytes()
-    table.write_bytes(content.replace(b'lor_0030713591_0x633', b'lor_0030713591_0x999'))
-    with pytest.raises(oops.host.HostIndexError,
-                       match=r"no supplement row for an index row \(1\): "
-                             r"\['NHJULO_2001/data/20070110_003071/"
-                             r"lor_0030713591_0x633_sci.lbl'\]"):
-        NewHorizonsLORRI.from_index(index)
-
-
-def rewrite_supplement_rows(tmp_path: pathlib.Path, edit: Any) -> pathlib.Path:
-    """Copy the index into `tmp_path`, apply `edit` to the list of the supplement's rows
-    as bytes, and return the index label."""
+def rewrite_rows(tmp_path: pathlib.Path, edit: Any, *,
+                 table: str = 'supplemental_index') -> pathlib.Path:
+    """Copy the index and supplement into `tmp_path`, apply `edit` to the list of the
+    rows of one table as bytes, and return the index label."""
 
     index = copy_index(tmp_path)
-    table = tmp_path / 'NHJULO_2001_supplemental_index_edited.tab'
-    rows = table.read_bytes().splitlines(keepends=True)
-    table.write_bytes(b''.join(edit(rows)))
+    path = tmp_path / f'NHJULO_2001_{table}_edited.tab'
+    rows = path.read_bytes().splitlines(keepends=True)
+    path.write_bytes(b''.join(edit(rows)))
     return index
+
+
+def built_before(snapshots: Iterator[Any], error: type[Exception], match: str) -> int:
+    """The number of Snapshots that an iteration yields before it raises `error`, whose
+    message must match `match`."""
+
+    built: list[Any] = []
+    with pytest.raises(error, match=match):
+        built.extend(snapshots)     # keeps each Snapshot given before the error
+    return len(built)
+
+
+def test_from_index_pairs_rows_by_file() -> None:
+    assert NewHorizonsLORRI.MERGE_SUPPLEMENT_BY_FILE is True
 
 
 def test_from_index_matches_supplement_rows_in_another_order(
         tmp_path: pathlib.Path) -> None:
-    index = rewrite_supplement_rows(tmp_path, lambda rows: rows[::-1])
+    index = rewrite_rows(tmp_path, lambda rows: rows[::-1])
     in_order = NewHorizonsLORRI.from_index(INDEX)
     reordered = NewHorizonsLORRI.from_index(index)
     assert [obs.dict for obs in reordered] == [obs.dict for obs in in_order]
 
 
+def test_from_index_reads_no_table_when_called(tmp_path: pathlib.Path) -> None:
+    """The call reads only the two labels; the tables are first read when the iteration
+    starts."""
+
+    index = copy_index(tmp_path)
+    (tmp_path / 'NHJULO_2001_index_edited.tab').unlink()
+    snapshots = NewHorizonsLORRI.from_index(index)
+    with pytest.raises(FileNotFoundError):
+        next(snapshots)
+
+
+def test_from_index_builds_rows_before_a_missing_row(tmp_path: pathlib.Path) -> None:
+    """Every row that the index table holds gives its Snapshot before the iteration
+    reaches the first row that the label lists but the table lacks (row 20 of 30)."""
+
+    index = rewrite_rows(tmp_path, lambda rows: rows[:20], table='index')
+    assert built_before(NewHorizonsLORRI.from_index(index), oops.host.HostIndexError,
+                        'invalid index table') == 20
+
+
+def test_from_index_rejects_a_mismatched_supplement(tmp_path: pathlib.Path) -> None:
+    """An index row whose file the supplement does not list raises once the whole
+    supplement has been read, after the rows before it."""
+
+    index = rewrite_rows(tmp_path, lambda rows: [row.replace(b'lor_0030713591_0x633',
+                                                             b'lor_0030713591_0x999')
+                                                 for row in rows])
+    match = (r"the supplement does not list the file of index row 21, "
+             r"'NHJULO_2001/data/20070110_003071/lor_0030713591_0x633_sci.lbl'")
+    assert built_before(NewHorizonsLORRI.from_index(index), oops.host.HostIndexError,
+                        match) == 21
+
+
 def test_from_index_rejects_a_supplement_row_given_twice(tmp_path: pathlib.Path) -> None:
-    index = rewrite_supplement_rows(tmp_path, lambda rows: rows[:-1] + rows[:1])
-    with pytest.raises(oops.host.HostIndexError,
-                       match=r"supplement lists a file more than once \(1\): "
-                             r"\['NHJULO_2001/data/20070110_003070/"
-                             r"lor_0030702839_0x630_sci.lbl'\]"):
-        NewHorizonsLORRI.from_index(index)
+    """A supplement row read ahead that gives the same file as another row read ahead
+    raises at once."""
+
+    index = rewrite_rows(tmp_path, lambda rows: [rows[1], rows[1], rows[0]] + rows[3:])
+    assert built_before(NewHorizonsLORRI.from_index(index), oops.host.HostIndexError,
+                        r'a second time, at row 1') == 0
 
 
 def test_from_index_rejects_an_index_row_given_twice(tmp_path: pathlib.Path) -> None:
-    index = copy_index(tmp_path)
-    table = tmp_path / 'NHJULO_2001_index_edited.tab'
-    rows = table.read_bytes().splitlines(keepends=True)
-    table.write_bytes(b''.join(rows[:-1] + rows[:1]))
-    with pytest.raises(oops.host.HostIndexError,
-                       match=r'index lists a file more than once \(1\)'):
-        NewHorizonsLORRI.from_index(index)
+    """An index row that repeats an earlier row's file finds no partner left, after the
+    rows before it."""
+
+    index = rewrite_rows(tmp_path, lambda rows: rows[:-1] + rows[:1], table='index')
+    assert built_before(NewHorizonsLORRI.from_index(index), oops.host.HostIndexError,
+                        'the supplement does not list the file of index row 29') == 29
 
 
 def test_from_index_filter() -> None:
@@ -1183,6 +1219,24 @@ def test_from_index_rejects_an_invalid_fov_type() -> None:
 def test_from_index_row_target(label_target: str, target: str) -> None:
     (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(TARGET_NAME=label_target)])
     assert obs.target == target
+
+
+# The supplement gives five moons of Jupiter without the "J<n> " of their labels; a
+# corrected supplement, and the names of the other moons, are left as they are
+@pytest.mark.parametrize(('row_target', 'label_target'), [
+    ('IO', 'J1 IO'),
+    ('CALLIRRHOE', 'J17 CALLIRRHOE'),
+    ('J1 IO', 'J1 IO'),
+    ('GANYMEDE', 'GANYMEDE'),
+])
+def test_from_index_row_label_target(row_target: str, label_target: str) -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(TARGET_NAME=row_target)])
+    assert obs.label_target == label_target
+
+
+def test_from_index_row_dict_gives_the_label_target_name() -> None:
+    (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(TARGET_NAME='EUROPA')])
+    assert obs.dict['TARGET_NAME'] == 'J2 EUROPA'
 
 
 def test_from_index_row_snapshot() -> None:
@@ -1249,7 +1303,7 @@ def test_from_index_creates_no_directories(tmp_path: pathlib.Path) -> None:
     assert not (holdings / 'volumes').exists()
 
 
-# An index read fetches no FITS file, so only an earlier read can have cached it
+# An index read leaves the FITS file unfetched, so only an earlier read can have cached it
 def test_from_index_remote_image_has_no_abspath() -> None:
     (obs,) = NewHorizonsLORRI.from_index('https://h.org/' + ROW_INDEX, row_dicts=[row()])
     assert 'abspath' not in obs.subfields
@@ -1260,16 +1314,6 @@ def test_from_index_remote_image_in_the_cache_has_abspath() -> None:
     (obs,) = NewHorizonsLORRI.from_index('https://h.org/' + ROW_INDEX, row_dicts=[row()])
     assert obs.abspath == cached.resolve()
 
-
-@pytest.mark.parametrize(('index', 'volumes'), [
-    ('/h/metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl',
-     '/h/volumes/NHxxLO_xxxx'),
-    ('https://h.org/metadata/NHxxLO_xxxx/NHxxLO_1999/NHxxLO_1999_index.lbl',
-     'https://h.org/volumes/NHxxLO_xxxx'),
-    ('/h/NHJULO_2001_index.lbl', '/h'),
-], ids=['metadata', 'cumulative-url', 'other'])
-def test_volumes_directory(index: str, volumes: str) -> None:
-    assert str(NewHorizonsLORRI._volumes_directory(index)) == volumes
 
 
 # A volume's own index lives in its INDEX directory, in either case
@@ -1299,13 +1343,13 @@ def test_from_index_rows_need_no_supplement() -> None:
 def test_from_index_uses_a_given_label(monkeypatch: pytest.MonkeyPatch) -> None:
     label = Pds3Label(INDEX)
     labels: list[Any] = []
-    read_index_rows = NewHorizonsLORRI._read_index_rows
+    index_rows = NewHorizonsLORRI._index_rows
 
     def spy(filepath: Any, **kwargs: Any) -> Any:
         labels.append(kwargs.get('label'))
-        return read_index_rows(filepath, **kwargs)
+        return index_rows(filepath, **kwargs)
 
-    monkeypatch.setattr(NewHorizonsLORRI, '_read_index_rows', spy)
+    monkeypatch.setattr(NewHorizonsLORRI, '_index_rows', spy)
     NewHorizonsLORRI.from_index(INDEX, label=label)
     assert labels == [label]
 
@@ -1420,12 +1464,25 @@ def test_from_index_row_zero_component_of_a_vector_is_kept() -> None:
 
 
 # The supplement writes zeros for the spacecraft's velocity relative to the Earth, which
-# no label gives; the Y component declares no null constant
+# no label gives; the column of the Y component does not declare a null constant
 def test_from_index_row_zero_vector_is_left_out() -> None:
     columns = vector('SC_EARTH_VELOCITY_VECTOR', 0., 0., 0.)
     columns['SC_EARTH_VELOCITY_VECTOR_Y_mask'] = np.False_
     row_dict = row_dict_of(**columns)
     assert [key for key in row_dict if key.startswith('SC_EARTH_VELOCITY')] == []
+
+
+# A corrected supplement declares a fill value that is never real, so a zero is not
+# masked, and a zero vector is a real value
+def test_from_index_row_zero_vector_that_is_not_masked_is_kept() -> None:
+    row_dict = row_dict_of(**vector('SC_EARTH_VELOCITY_VECTOR', 0., 0., 0., mask=False))
+    assert row_dict['SC_EARTH_VELOCITY_VECTOR_Y'] == 0.
+
+
+# A corrected supplement spells the quaternion as the label does
+def test_from_index_row_zero_component_with_the_label_spelling_is_kept() -> None:
+    row_dict = row_dict_of(**vector('QUATERNION', 0.5, 0., 0.5, 0.7))
+    assert row_dict['QUATERNION_2'] == 0.
 
 
 # An image without target geometry has a zero vector from the spacecraft to the target

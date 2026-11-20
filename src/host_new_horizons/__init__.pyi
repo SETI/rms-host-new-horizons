@@ -15,7 +15,7 @@ The detectors and support methods that a Host subclass overrides or calls, such 
 """
 
 import pathlib
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
 from astropy.io.fits import HDUList
@@ -38,10 +38,10 @@ class NewHorizonsLORRI(Host):
     # A missing or unreadable file raises OSError (FileNotFoundError for a FITS file that
     # a label names but that does not exist). A file whose content cannot be parsed or
     # used raises oops.host.HostFormatError, or its subclass PdsHostError for a label
-    # (also for a label that names no FITS file). geom or pointing other than "spice" in
-    # an astrometry read of a PDS3 label raises oops.OopsValueError. An image with no
-    # C-kernel pointing raises oops.OopsSpiceError, whose message ends with the SPICE
-    # error code, such as "SPICE(NOFRAMECONNECT)"; never when `frame` is given or
+    # (also for a label that lacks an ^IMAGE pointer). geom or pointing other than "spice"
+    # in an astrometry read of a PDS3 label raises oops.OopsValueError. An image whose
+    # C-kernel pointing is missing raises oops.OopsSpiceError, whose message ends with the
+    # SPICE error code, such as "SPICE(NOFRAMECONNECT)"; never when `frame` is given or
     # `pointing` is not "spice". A select other than None raises oops.OopsValueError, and
     # any keyword not listed raises oops.OopsTypeError. from_index checks the pointing of
     # each row only to give a row without it a frame that raises oops.OopsSpiceError when
@@ -62,15 +62,17 @@ class NewHorizonsLORRI(Host):
         parallel: Observation | None = None, **kwargs: Any) -> Snapshot: ...
     # Every row is one Snapshot. supplement=None without row_dicts raises
     # oops.host.HostIndexError, a select other than None raises oops.OopsValueError, and
-    # any keyword not listed raises oops.OopsTypeError. The iterator builds each row's
-    # Snapshot when it reaches the row. An index in a volume's own INDEX directory raises
-    # oops.host.HostIndexError.
+    # any keyword not listed raises oops.OopsTypeError. The call reads only the labels;
+    # the iterator reads the index and its supplement a few rows at a time, pairs each
+    # index row with the supplement row of the same file, and builds each row's Snapshot
+    # when it reaches the row. An index in a volume's own INDEX directory raises
+    # oops.host.HostIndexError at call time.
     @staticmethod
     def from_index(
         filepath: str | pathlib.Path | FCPath, *,
         supplement: str | pathlib.Path | FCPath | object | None = ...,
         label: Pds3Label | None = None,
-        row_dicts: list[dict[str, Any]] | None = None,
+        row_dicts: Iterable[dict[str, Any]] | None = None,
         pds3_options: dict[str, Any] | None = None,
         filter: dict[str, Any] | None = None, fov_type: str = 'fast',
         return_all_planets: bool = False,

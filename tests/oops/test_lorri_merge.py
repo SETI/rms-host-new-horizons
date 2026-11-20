@@ -12,7 +12,7 @@ import julian
 import oops
 import pytest
 from astropy.io import fits
-from conftest import FITS_HEADER, cache_file, write_fits, write_label
+from conftest import FITS_HEADER, FakeSpiceFrame, cache_file, write_fits, write_label
 from filecache import FCPath
 from pdsparser import Pds3Label
 
@@ -240,11 +240,35 @@ def test_full_read_of_a_label_without_a_file(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_file(label_without_a_file(tmp_path))
 
 
-def hdulist_without_a_file(tmp_path: pathlib.Path) -> fits.HDUList:
-    """A synthetic FITS file copied into memory, so that it has no file name."""
+def hdulist_without_a_file(tmp_path: pathlib.Path, **keywords: Any) -> fits.HDUList:
+    """A synthetic FITS file, written with the given header keywords and copied into
+    memory, so that it has no file name."""
 
-    with fits.open(write_fits(tmp_path / 'lor_test.fit')) as hdulist:
+    with fits.open(write_fits(tmp_path / 'lor_test.fit', **keywords)) as hdulist:
         return fits.HDUList([hdu.copy() for hdu in hdulist])
+
+
+def test_message_for_an_hdulist_without_a_file(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(oops.host.HostFormatError,
+                       match=r'^no EXPOSURE_DURATION for LORRI image without a file '
+                             r'path$'):
+        NewHorizonsLORRI.from_file(hdulist_without_a_file(tmp_path, EXPTIME=None))
+
+
+def test_hdulist_of_another_instrument_without_a_file(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(oops.host.WrongHostError,
+                       match=r'^not a New Horizons LORRI FITS file: HDUList without a '
+                             r'file path$'):
+        NewHorizonsLORRI.from_file(hdulist_without_a_file(tmp_path, INSTRU='mvi'))
+
+
+def test_label_of_another_instrument_without_a_file(tmp_path: pathlib.Path) -> None:
+    label = Pds3Label(write_label(tmp_path / 'mvic.lbl', 'MVIC.FIT',
+                                  INSTRUMENT_ID='"MVIC"').read_text())
+    with pytest.raises(oops.host.WrongHostError,
+                       match=r'^not a New Horizons LORRI PDS3 label: Pds3Label without '
+                             r'a file path$'):
+        NewHorizonsLORRI.from_file(label)
 
 
 def test_hdulist_without_a_file(tmp_path: pathlib.Path) -> None:
@@ -399,7 +423,7 @@ def test_fits_geometry_uses_the_header_epoch(tmp_path: pathlib.Path,
     """The header's position and velocity are those at SPCSCET, not at the observation's
     midtime; a velocity of 1000 km/s makes an epoch even 1 microsecond off show as 1 m.
 
-    Without EXPTIME the header gives no start time, so the label's, 2 s later, sets a
+    Without EXPTIME the header lacks a start time, so the label's, 2 s later, sets a
     midtime that differs from SPCSCET.
     """
 
@@ -555,12 +579,14 @@ def test_invalid_label_parser_options(tmp_path: pathlib.Path, options: dict[str,
 
 def no_pointing(monkeypatch: pytest.MonkeyPatch, message: str,
                 error: type[Exception] = RuntimeError) -> None:
-    """Make the camera frame raise `error(message)` when it is evaluated."""
+    """Make the SPICE frame beneath the camera frame raise `error(message)` when it is
+    evaluated. Only that frame lacks data: the camera frame, a Cmatrix on it, still gives
+    its own fixed rotation."""
 
     def transform_at_time(self: Any, *args: Any, **kwargs: Any) -> Any:
         raise error(message)
 
-    monkeypatch.setattr(oops.frame.Cmatrix, 'transform_at_time', transform_at_time)
+    monkeypatch.setattr(FakeSpiceFrame, 'transform_at_time', transform_at_time)
 
 
 # The synthetic image's midtime, SPCSCET, is 2007-01-10T05:41:10.863 UTC
@@ -575,6 +601,21 @@ def test_missing_pointing_raises_oops_spice_error(tmp_path: pathlib.Path,
                              r'2007-01-10T05:41:10\.863 for .*lor_test\.fit: '
                              r'SPICE\(NOFRAMECONNECT\)$'):
         NewHorizonsLORRI.from_file(tmp_path / f'lor_test.{suffix}')
+
+
+def test_missing_pointing_is_found_beneath_the_camera_frame(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The camera frame's own fixed rotation still works when only the SPICE frame lacks
+    data, and from_file() raises all the same."""
+
+    path = write_fits(tmp_path / 'lor_test.fit')
+    no_pointing(monkeypatch, 'SPICE(CKINSUFFDATA) -- no data')
+    NewHorizonsLORRI.initialize()
+    NewHorizonsLORRI._define_camera_frame()
+    camera = oops.Frame.as_frame('NH_LORRI')
+    assert isinstance(camera.transform_at_time(MIDTIME), oops.Transform)
+    with pytest.raises(oops.OopsSpiceError, match=r'SPICE\(CKINSUFFDATA\)$'):
+        NewHorizonsLORRI.from_file(path)
 
 
 def test_missing_pointing_error_attributes(tmp_path: pathlib.Path,
@@ -620,15 +661,19 @@ def test_pointing_is_not_checked_with_a_cmatrix(tmp_path: pathlib.Path,
     assert obs.frame.frame_id == frame.frame_id
 
 
+# An index row merged with its supplement, and the middle of its exposure
+INDEX_ROW = {'VOLUME_ID': 'NHJULO_2001', 'FILE_SPECIFICATION_NAME': 'data/lor_test.lbl',
+             'START_TIME': '2007-01-10T05:41:08.363', 'EXPOSURE_DURATION': 5.,
+             'BINNING_MODE': '1x1'}
+ROW_MIDTIME = julian.tdb_from_tai(julian.tai_from_iso('2007-01-10T05:41:08.363')) + 2.5
+
+
 def row_without_pointing(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     """The Snapshot of an index row whose pointing the C kernels cannot supply."""
 
     no_pointing(monkeypatch, 'SPICE(NOFRAMECONNECT) -- sxform -- insufficient data')
-    row = {'VOLUME_ID': 'NHJULO_2001', 'FILE_SPECIFICATION_NAME': 'data/lor_test.lbl',
-           'START_TIME': '2007-01-10T05:41:08.363', 'EXPOSURE_DURATION': 5.,
-           'BINNING_MODE': '1x1'}
     (obs,) = NewHorizonsLORRI.from_index(tmp_path / 'NHJULO_2001_index.lbl',
-                                         row_dicts=[row])
+                                         row_dicts=[dict(INDEX_ROW)])
     return obs
 
 
@@ -674,6 +719,25 @@ def test_pointing_is_checked_at_the_cadence_override(
     cadence = oops.cadence.SnapCadence(1000., 10.)
     NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), cadence=cadence)
     assert times == [1005.]
+
+
+@pytest.mark.parametrize(('options', 'expected'), [
+    ({'cadence': oops.cadence.SnapCadence(1000., 10.)}, 1005.),
+    ({'timeshift': (3., 'T')}, ROW_MIDTIME + 3.),
+])
+def test_from_index_pointing_is_checked_at_the_overridden_midtime(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, options: dict[str, Any],
+        expected: float) -> None:
+    times = []
+
+    def check_pointing(tdb: float, filepath: Any, *, defer: bool = False) -> str:
+        times.append(tdb)
+        return 'NH_LORRI'
+
+    monkeypatch.setattr(NewHorizonsLORRI, '_check_pointing', staticmethod(check_pointing))
+    list(NewHorizonsLORRI.from_index(tmp_path / 'NHJULO_2001_index.lbl',
+                                     row_dicts=[dict(INDEX_ROW)], **options))
+    assert times == [pytest.approx(expected, abs=1.e-6)]
 
 
 @pytest.mark.parametrize('options', [{'frame': 'J2000'}, {'pointing': 'fits'}])
