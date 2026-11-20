@@ -493,6 +493,17 @@ def test_target_without_spice_coverage_has_no_calibration(
     assert obs.calibrations == []
 
 
+def test_calibration_error_without_a_spice_code_passes_through(
+        tmp_path: pathlib.Path, sun_path: oops.Path, jupiter_path: oops.Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    def event_at_time(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError('something else')
+
+    monkeypatch.setattr(oops.path.FixedPath, 'event_at_time', event_at_time)
+    with pytest.raises(RuntimeError, match=r'^something else$'):
+        load(tmp_path, fits_keywords={'RSOLAR': RSOLAR})
+
+
 def test_calibrations_override(tmp_path: pathlib.Path, sun_path: oops.Path,
                                jupiter_path: oops.Path) -> None:
     calibration = oops.calibration.FlatCalib('DN', 1.)
@@ -1102,6 +1113,19 @@ def test_from_index_requires_a_named_supplement(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_index(renamed)
 
 
+def test_from_index_requires_the_volume_column(tmp_path: pathlib.Path) -> None:
+    """A supplement without VOLUME_ID is refused when from_index() is called, rather than
+    paired by FILE_SPECIFICATION_NAME alone."""
+
+    index = copy_index(tmp_path)
+    supplement = tmp_path / 'NHJULO_2001_supplemental_index_edited.lbl'
+    text = supplement.read_text()
+    supplement.write_text(text.replace('= VOLUME_ID\n', '= VOLUME_XX\n'))
+    with pytest.raises(oops.host.HostIndexError,
+                       match=r'^the supplement lacks the column VOLUME_ID: '):
+        NewHorizonsLORRI.from_index(index)
+
+
 def test_from_index_rejects_another_host(tmp_path: pathlib.Path) -> None:
     index = copy_index(tmp_path)
     index.write_text(index.read_text().replace('INSTRUMENT_ID         = "LORRI"',
@@ -1187,8 +1211,8 @@ def test_from_index_rejects_a_supplement_row_given_twice(tmp_path: pathlib.Path)
 
 
 def test_from_index_rejects_an_index_row_given_twice(tmp_path: pathlib.Path) -> None:
-    """An index row that repeats an earlier row's file finds no partner left, after the
-    rows before it."""
+    """An index row that repeats an earlier row's file is left without a partner, because
+    the earlier row used it, and raises after the rows before it."""
 
     index = rewrite_rows(tmp_path, lambda rows: rows[:-1] + rows[:1], table='index')
     assert built_before(NewHorizonsLORRI.from_index(index), oops.host.HostIndexError,
@@ -1464,7 +1488,8 @@ def test_from_index_row_zero_component_of_a_vector_is_kept() -> None:
 
 
 # The supplement writes zeros for the spacecraft's velocity relative to the Earth, which
-# no label gives; the column of the Y component does not declare a null constant
+# is missing from every label; the column of the Y component does not declare a null
+# constant
 def test_from_index_row_zero_vector_is_left_out() -> None:
     columns = vector('SC_EARTH_VELOCITY_VECTOR', 0., 0., 0.)
     columns['SC_EARTH_VELOCITY_VECTOR_Y_mask'] = np.False_
@@ -1588,6 +1613,19 @@ def test_time_from_an_unreadable_clock_count(monkeypatch: pytest.MonkeyPatch) ->
                        match=r'no time for the LORRI clock count 0030713585:49000 for '
                              r'.*lor_0030713591_0x633_sci\.fit: '
                              r'SPICE\(INVALIDSCLKSTRING\)'):
+        next(snapshots)
+
+
+def test_clock_error_without_a_spice_code_passes_through(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    def scs2e(sc: int, count: str) -> float:
+        raise ValueError('something else')
+
+    monkeypatch.setattr(cspyce, 'scs2e', scs2e)
+    row_dict = row()
+    del row_dict['START_TIME']
+    snapshots = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row_dict])
+    with pytest.raises(ValueError, match=r'^something else$'):
         next(snapshots)
 
 

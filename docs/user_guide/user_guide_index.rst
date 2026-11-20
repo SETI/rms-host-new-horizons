@@ -13,8 +13,10 @@ supplement, so a wrong argument or a label that cannot be read raises an error a
 The rows are read as the iteration proceeds, a few at a time, and each row's Snapshot is
 built when the iteration reaches that row. The memory used stays the same however long
 the index is. An error in a row is raised when the iteration reaches it, after the rows
-before it have been given. The iteration ends at that row, and the rows after it are not
-built. The ``filter`` argument, described below, can leave such a row out. To build
+before it have been given. The one exception is a row longer than the label says, which
+is found as the rows are read, ten at a time: its error comes at the first of those ten
+rows. The iteration ends at the row that raises, and the rows after it are not built.
+The ``filter`` argument, described below, can leave such a row out. To build
 every row at once, pass the iterator to ``list()``:
 
 .. code-block:: python
@@ -54,14 +56,15 @@ The ``supplement`` argument chooses the supplemental index:
 
 - By default, the host reads the file beside the index whose name has
   ``_supplemental_index`` in place of ``_index``, in upper or lower case. That file must
-  exist, and an index whose file name holds no ``_index`` raises
+  exist, and an index whose file name lacks ``_index`` raises
   :exc:`~oops.host.HostIndexError`.
 - A path or URL reads that file instead.
 - None raises :exc:`~oops.host.HostIndexError`, unless ``row_dicts`` is given.
 
-The two tables must list the same images, but not necessarily in the same order: in
-``NHJULO_1001`` and the cumulative ``NHxxLO_1999``, the index lists one image last that
-the supplement lists in date order. So each index row is merged with the supplement row
+The two tables must list the same images, but not necessarily in the same order. Until
+the index is corrected, the index of ``NHJULO_1001``, and so the cumulative
+``NHxxLO_1999``, lists one image out of place, last, while the supplement lists every
+image in file order. So each index row is merged with the supplement row
 that has the same ``VOLUME_ID`` and ``FILE_SPECIFICATION_NAME``. The supplement is read
 only as far ahead as the row that matches the current index row, and the rows read
 ahead are kept until their own index rows come. The Snapshots come in the order of the
@@ -93,9 +96,11 @@ Other arguments
     A dictionary of column names and the values to keep. A row is kept when each column
     equals its value, is one of a set of values, or falls in a range given as a tuple of
     two values. A row without one of the columns is left out. A column that neither
-    table has raises :exc:`~oops.OopsValueError` when the method is called, and a range
-    that cannot be compared with a row's value raises :exc:`~oops.OopsTypeError` when
-    the iteration reaches that row.
+    table has raises :exc:`~oops.OopsValueError` when the method is called. With
+    ``row_dicts``, the columns are checked against the first row instead: when the
+    method is called if the rows are a list or another sequence, and when the iteration
+    reads the first row otherwise. A range that cannot be compared with a row's value
+    raises :exc:`~oops.OopsTypeError` when the iteration reaches that row.
 
 ``select``
     Must be None. Each row is one image, so there is nothing to select, and any other
@@ -111,7 +116,7 @@ not silently ignored.
 What one row gives
 ==================
 
-Each row gives a :class:`~oops.observation.Snapshot` with no ``data``. Its ``dict``
+Each row gives a :class:`~oops.observation.Snapshot` without ``data``. Its ``dict``
 subfield holds the merged row, with the same treatment of missing values as a label (see
 :doc:`user_guide_metadata`). The supplement declares a null constant for many columns,
 and the host leaves out a value equal to it, with one exception: zero is the null

@@ -18,10 +18,12 @@ product, the FITS file or its PDS3 label:
 What is read
 ============
 
-A path that ends in ``.fit`` or ``.fits``, in any case, is read as a FITS file, and any
-other path as a PDS3 label. What the host reads depends on the file it is given and on
-the ``astrometry`` option. An astrometry read is for work that needs only the image's
-time and geometry, so it leaves the image arrays unread.
+A path that ends in ``.fit`` or ``.fits``, in any case, is read as a FITS file. A path
+that ends in ``.lbl``, in any case, is read as a PDS3 label, and so is any other file
+whose first bytes hold ``PDS_VERSION_ID``. Any other file raises
+:exc:`~oops.host.WrongHostError`. What the host reads depends on the file it is given
+and on the ``astrometry`` option. An astrometry read is for work that needs only the
+image's time and geometry, so it leaves the image arrays unread.
 
 .. list-table::
    :header-rows: 1

@@ -46,7 +46,7 @@ The ``fov_type`` option chooses how the field of view models the camera's distor
     The same polynomial, inverted by Newton's method where the inverse is needed.
 
 ``"flat"``
-    A field of view with no distortion, 4.96 microradians per unbinned pixel.
+    A field of view without distortion, 4.96 microradians per unbinned pixel.
 
 Calibration
 ===========

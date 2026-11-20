@@ -75,15 +75,16 @@ If the chosen label lacks a value for an item, the other label's value is used.
 Missing values
 ==============
 
-A value that no label read gives is left out: there is no ``dict`` key and no subfield
-for it, and never a None or a placeholder in its place. These count as no value:
+A value missing from every label read is left out of ``dict`` and the subfields, and
+nothing takes its place, neither None nor a placeholder. These count as missing:
 
-- the PDS3 null constants ``UNK``, ``N/A``, and ``NULL``, and the values ``---``,
-  ``UNKNOWN``, and an empty string, which the FITS header writes for a body, a request,
-  or a file it does not give, all compared in any case;
+- the placeholders ``UNK``, ``N/A``, ``NULL``, ``NOT APPLICABLE``, ``---``,
+  ``UNKNOWN``, and an empty string, compared in any case and without surrounding
+  blanks. The first three are the PDS3 null constants, and the FITS header writes the
+  last three for a body, a request, or a file it does not give;
 - the FITS header's fill value -1e32, which it writes for a value its pipeline cannot
   compute, such as the target geometry of an image that has no target;
-- a list whose elements all count as no value.
+- a list whose elements all count as missing.
 
 A list in the PDS3 label with some missing elements among others is a vector, such as
 ``SC_TARGET_POSITION_VECTOR``, in which each position has a meaning. In ``dict`` it
@@ -124,7 +125,8 @@ Subfields
 =========
 
 Besides ``dict``, ``label_dict``, ``header_dict``, ``headers``, and ``data``, every
-Snapshot has these subfields. One whose item no label gives is absent.
+Snapshot has these subfields, except that a subfield is absent when its item is missing
+from every label read.
 
 .. list-table::
    :header-rows: 1
@@ -142,7 +144,7 @@ Snapshot has these subfields. One whose item no label gives is absent.
      - ``SPACECRAFT_CLOCK_START_COUNT`` and ``SPACECRAFT_CLOCK_STOP_COUNT``, described
        below.
    * - ``time_from_sclk``
-     - True if no label read gives a start time, so that the time comes from the clock
+     - True if the labels read lack a start time, so that the time comes from the clock
        count (see :doc:`user_guide_geometry`); False otherwise.
    * - ``error``, ``quality``
      - The error estimates and quality flags of a calibrated image, except in an

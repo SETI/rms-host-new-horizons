@@ -450,7 +450,7 @@ def test_header_null_values_are_left_out_of_dict(tmp_path: pathlib.Path,
     assert 'SPCTCB' not in obs.dict
 
 
-@pytest.mark.parametrize('null', ['"UNKNOWN"', '""', '"N/A"'])
+@pytest.mark.parametrize('null', ['"UNKNOWN"', '""', '"N/A"', '"NOT APPLICABLE"'])
 def test_label_null_values_are_left_out_of_dict(tmp_path: pathlib.Path,
                                                 null: str) -> None:
     obs = from_label(tmp_path, extra=(f'NEWHORIZONS:OBSERVATION_DESC = {null}',))
@@ -531,6 +531,20 @@ def test_label_parser_falls_back(tmp_path: pathlib.Path, extra: tuple[str, ...],
     assert {key: obs.label_dict[key] for key in expected} == expected
 
 
+def test_label_with_another_suffix_is_read(tmp_path: pathlib.Path) -> None:
+    label = write_label(tmp_path / 'lor_test.txt', 'LOR_TEST.FIT')
+    obs = NewHorizonsLORRI.from_file(label, astrometry=True)
+    assert obs.label_target == 'JUPITER'
+
+
+def test_file_that_is_neither_label_nor_fits(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / 'lor_test.txt'
+    path.write_text('not a label\n')
+    with pytest.raises(oops.host.WrongHostError,
+                       match=r'^not a New Horizons LORRI file: .*lor_test\.txt$'):
+        NewHorizonsLORRI.from_file(path)
+
+
 def test_label_parser_compound_method(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
     obs = NewHorizonsLORRI.from_file(label, astrometry=True,
@@ -540,7 +554,8 @@ def test_label_parser_compound_method(tmp_path: pathlib.Path) -> None:
 
 def test_label_parser_compound_method_is_tried_alone(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', START_TIME='"x')
-    with pytest.raises(oops.host.PdsHostError, match=r'method compound: [^;]*$'):
+    with pytest.raises(oops.host.PdsHostError,
+                       match=r'^cannot parse the PDS3 label .*lor_test\.lbl: [^;]*$'):
         NewHorizonsLORRI.from_file(label, astrometry=True,
                                    pds3_options={'method': 'compound'})
 
@@ -558,13 +573,14 @@ def test_label_parser_starts_at_the_given_method(tmp_path: pathlib.Path) -> None
 def test_unreadable_label(tmp_path: pathlib.Path, start_time: str) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', START_TIME=start_time)
     with pytest.raises(oops.host.PdsHostError,
-                       match=r'PDS3 label cannot be parsed: .*method fast: '):
+                       match=r'^cannot parse the PDS3 label .*lor_test\.lbl: '
+                             r'method fast: .*; method strict: .*; method loose: '):
         NewHorizonsLORRI.from_file(label, astrometry=True)
 
 
 @pytest.mark.parametrize(('options', 'message'), [
-    ({'method': 'quick'}, "invalid PDS3 parser method 'quick'"),
-    ({'bogus': 1}, 'invalid PDS3 parser option'),
+    ({'method': 'quick'}, "^invalid method: 'quick'$"),
+    ({'bogus': 1}, "unexpected keyword argument 'bogus'$"),
 ])
 def test_invalid_label_parser_options(tmp_path: pathlib.Path, options: dict[str, Any],
                                       message: str) -> None:
@@ -696,19 +712,45 @@ def test_frame_of_a_row_without_pointing_raises_oops_spice_error(
 @pytest.mark.parametrize(('options', 'expected'), [
     ({'timeshift': (3., 'T')}, MIDTIME + 3.),
     ({'timeshift': (3., 'PT')}, MIDTIME + 3.),
-    ({'timeshift': (3., 'F')}, MIDTIME),
+    ({'timeshift': (3., 'F')}, MIDTIME + 3.),
+    ({'timeshift': (3., 'TF')}, MIDTIME + 6.),
     ({'timeshift': (3., 't'), 'cadence': oops.cadence.SnapCadence(1000., 10.)}, 1008.),
 ])
 def test_pointing_is_checked_at_the_shifted_midtime(
         tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, options: dict[str, Any],
         expected: float) -> None:
-    """A time shift of the cadence ("T") moves the time the pointing is checked at."""
+    """A time shift of the cadence ("T") moves the time the pointing is checked at, and
+    one of the frame ("F") moves it again, by the time at which the frame is evaluated."""
 
     times = []
     monkeypatch.setattr(NewHorizonsLORRI, '_check_pointing',
                         staticmethod(lambda tdb, filepath: times.append(tdb)))
     NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), **options)
     assert times == [pytest.approx(expected, abs=1.e-6)]
+
+
+def pointing_until(monkeypatch: pytest.MonkeyPatch, last: float) -> None:
+    """Make the SPICE frame beneath the camera frame lack data after the time `last`."""
+
+    original = FakeSpiceFrame.transform_at_time
+
+    def transform_at_time(self: Any, time: Any, *, quick: Any = None) -> Any:
+        if float(oops.Scalar.as_scalar(time).vals) > last:
+            raise RuntimeError('SPICE(CKINSUFFDATA) -- no data')
+        return original(self, time, quick=quick)
+
+    monkeypatch.setattr(FakeSpiceFrame, 'transform_at_time', transform_at_time)
+
+
+def test_frame_time_shift_is_checked_where_the_pointing_ends(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the pointing ending one second after the midtime, a three-second shift of the
+    frame alone is evaluated past the end and so is refused at once."""
+
+    path = write_fits(tmp_path / 'lor_test.fit')
+    pointing_until(monkeypatch, MIDTIME + 1.)
+    with pytest.raises(oops.OopsSpiceError, match=r'SPICE\(CKINSUFFDATA\)$'):
+        NewHorizonsLORRI.from_file(path, timeshift=(3., 'F'))
 
 
 def test_pointing_is_checked_at_the_cadence_override(
@@ -724,6 +766,7 @@ def test_pointing_is_checked_at_the_cadence_override(
 @pytest.mark.parametrize(('options', 'expected'), [
     ({'cadence': oops.cadence.SnapCadence(1000., 10.)}, 1005.),
     ({'timeshift': (3., 'T')}, ROW_MIDTIME + 3.),
+    ({'timeshift': (3., 'f')}, ROW_MIDTIME + 3.),
 ])
 def test_from_index_pointing_is_checked_at_the_overridden_midtime(
         tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, options: dict[str, Any],

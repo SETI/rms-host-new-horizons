@@ -11,7 +11,7 @@ the start is ``SPCSCET``, the middle of the exposure in seconds TDB, less half o
 ``EXPTIME``. The PDS3 label gives the same start in UTC, rounded to the millisecond, and
 the header's value is used when both are read (see :doc:`user_guide_metadata`).
 
-If no label read gives a start time, the host converts
+If the labels read lack a start time, the host converts
 ``SPACECRAFT_CLOCK_START_COUNT`` to a time with the SPICE clock kernel, and the
 ``time_from_sclk`` subfield is True. An image cannot be read if it has neither a start
 time nor a clock count (see :doc:`user_guide_errors`).
@@ -26,8 +26,10 @@ axis, while OOPS expects it along +*z*. The host therefore registers the SPICE f
 and *z* axes reversed. The ``spice_to_frame`` subfield holds that rotation.
 
 When :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` builds the frame
-from the C kernels, it checks at once that they hold the pointing at the middle of the
-exposure, after any ``cadence`` or ``timeshift`` override. If they do not, it raises
+from the C kernels, it checks at once that they hold the pointing at the time when the
+frame will be evaluated. That is the middle of the exposure, moved by any ``cadence``
+override, and by a ``timeshift`` of the start and stop times ("T"), of the frame ("F"),
+or of both, which moves it twice. If they do not, it raises
 :exc:`oops.OopsSpiceError` (see :doc:`user_guide_errors`).
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` looks the pointing up
 in the same way, and a row without pointing still gives a Snapshot, whose frame raises

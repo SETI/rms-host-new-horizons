@@ -11,17 +11,18 @@ Reading an image file
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` raises:
 
 :exc:`oops.OopsSpiceError`
-    The C kernels hold no pointing for the camera at the middle of the exposure. The
-    message gives the time and the FITS file, and ends with the SPICE error code, such
+    The C kernels lack the pointing of the camera at the time when the frame will be
+    evaluated, the middle of the exposure moved by any ``cadence`` or ``timeshift``
+    override (see :doc:`user_guide_geometry`). The message gives the time and the FITS file, and ends with the SPICE error code, such
     as ``SPICE(NOFRAMECONNECT)``. It is never raised for missing pointing when the
     caller supplies the pointing with the ``frame`` override, or takes it from the FITS
     header with the ``pointing`` option. Whatever the pointing, it is also raised when
-    no label read gives a start time and the clock kernel cannot convert the clock
+    the labels read lack a start time and the clock kernel cannot convert the clock
     count.
 
 :exc:`~oops.host.HostFormatError`
-    No label read gives the exposure duration, the lines of the image, or either a
-    start time or a clock count; the image has neither 1024 nor 256 lines; the FITS file
+    The labels read lack the exposure duration, the lines of the image, or both a start
+    time and a clock count; the image has neither 1024 nor 256 lines; the FITS file
     is not valid FITS; or a parsed label that was not read from a file is given for a
     normal read, so that no file path is known for its FITS file. The message gives the
     item, and the file if one is known. For an image passed in memory that was not read
@@ -59,12 +60,14 @@ Reading a PDS3 index
     ``INDEX``; ``supplement`` is None and ``row_dicts`` is not given; the index's file
     name holds no ``_index`` from which to find the supplement; or either label does not
     describe an index table with the columns ``VOLUME_ID`` and
-    ``FILE_SPECIFICATION_NAME``. Raised when the iteration reaches the row concerned:
-    a row that the table file lacks or that does not match its label; an index row whose
-    image the supplement does not list, found once the whole supplement has been read;
-    or a supplement row that lists an image a second time while its first row is still
-    being kept. Raised after the last row: the supplement lists images that the index
-    does not, or lists an image more times than the index.
+    ``FILE_SPECIFICATION_NAME``. Raised during the iteration: after the last row of a
+    table file that holds fewer rows than its label says; for a row longer than its
+    label's row length, at the first of the ten rows read with it, so those ten rows
+    are not built; for an index row whose image the supplement does not list, once the
+    whole supplement has been read; or for a supplement row that lists an image a second
+    time while its first row is still being kept. Raised after the last row: a table
+    file holds more rows than its label says, or the supplement lists images that the
+    index does not, or lists an image more times than the index.
 
 :exc:`~oops.host.PdsHostError`
     The PDS3 label of the index or of the supplement cannot be parsed.
@@ -90,7 +93,9 @@ Reading a PDS3 index
 :exc:`~oops.OopsValueError`
     ``fov_type`` is not one of its values, ``select`` is not None, ``filter`` asks for a
     column that neither table has, or ``pds3_options`` holds an option that the parser
-    does not accept.
+    does not accept. With ``row_dicts`` given as an iterable other than a list or
+    another sequence, a ``filter`` column that the first row lacks raises this error
+    when the iteration reads that row.
 
 :exc:`~oops.host.WrongHostError`
     The file is not a New Horizons LORRI index.
