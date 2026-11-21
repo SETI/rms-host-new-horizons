@@ -64,9 +64,9 @@ Initialization
 
 The first call to :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` or
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` loads the kernels and
-defines the camera's fields of view. To choose the bodies that OOPS defines, to use only
-the kernels that existed before a given date, or to furnish a metakernel instead of the
-kernels chosen from the database, call
+defines the camera's fields of view. To choose the bodies that OOPS defines, to prefer
+the kernels released by a given date, or to furnish a metakernel instead of the kernels
+chosen from the database, call
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` before opening the
 first image. Its ``planets`` option takes one planet number, from 1 to 9, or a sequence
 of them. OOPS always defines the Sun, Mercury, Venus, Earth, and the Moon, and this call
@@ -77,6 +77,15 @@ adds Jupiter and Pluto, planets 5 and 9, with their moons:
    from host_new_horizons import NewHorizonsLORRI
 
    NewHorizonsLORRI.initialize(planets=(5, 9))
+
+Its ``asof`` option takes a date, such as ``'2016-01-01'``, and each kernel is then
+chosen from those released on or before that date where possible. Where the kernel
+database does not hold a kernel of some kind that old, a later one is used, the one that
+would be chosen without a date, and no warning is given. The C kernels are the
+exception: if none was released by the date, as for any date before 2015-03-12,
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` raises
+:exc:`ValueError`. With ``meta``, the kernels that the metakernel lists are furnished
+whatever their release dates.
 
 Later calls to :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` leave
 the first call's definitions and kernels as they are.
