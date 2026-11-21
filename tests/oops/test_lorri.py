@@ -303,9 +303,7 @@ def test_from_file_refuses_select(tmp_path: pathlib.Path, select: Any) -> None:
 
 
 def test_from_file_rejects_an_unknown_keyword(tmp_path: pathlib.Path) -> None:
-    with pytest.raises(oops.OopsTypeError,
-                       match=r"unexpected keyword argument for "
-                             r"NewHorizonsLORRI\.from_file: 'calibration'"):
+    with pytest.raises(TypeError, match=r"unexpected keyword argument 'calibration'"):
         NewHorizonsLORRI.from_file(tmp_path / 'missing.fit', calibration=[])
 
 
@@ -620,6 +618,17 @@ def test_from_file_path_subfields(tmp_path: pathlib.Path) -> None:
     assert obs.basename == 'lor_test.fit'
     assert obs.abspath == path.resolve()
     assert obs.image_url == path.absolute().as_posix()
+
+
+# abspath is the local path of the FITS file that the read retrieved for its pixels
+def test_from_file_remote_fits_has_the_retrieved_path() -> None:
+    cached = write_fits(cache_file('https://example.org/volume/lor_test.fit'))
+    obs = NewHorizonsLORRI.from_file('https://example.org/volume/lor_test.fit')
+    assert obs.abspath == cached.resolve()
+
+
+def test_from_file_fits_astrometry_has_no_abspath(tmp_path: pathlib.Path) -> None:
+    assert 'abspath' not in load(tmp_path, astrometry=True).subfields
 
 
 def test_from_file_spice_subfields(tmp_path: pathlib.Path,
@@ -937,6 +946,13 @@ def test_from_file_label_astrometry_reads_no_fits_file(tmp_path: pathlib.Path) -
     assert obs.texp == 5.
 
 
+def test_from_file_label_astrometry_has_no_abspath(tmp_path: pathlib.Path) -> None:
+    write_fits(tmp_path / 'lor_test.fit')
+    label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT')
+    obs = NewHorizonsLORRI.from_file(label, astrometry=True)
+    assert 'abspath' not in obs.subfields
+
+
 def test_from_file_label_astrometry_values(tmp_path: pathlib.Path) -> None:
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT', lines=256)
     obs = NewHorizonsLORRI.from_file(label, astrometry=True)
@@ -985,6 +1001,11 @@ def test_from_file_hdulist(tmp_path: pathlib.Path) -> None:
     obs = NewHorizonsLORRI.from_file(hdulist)
     assert obs.filepath == FCPath(path)
     assert np.array_equal(obs.data, np.arange(1024 * 1024).reshape(1024, 1024))
+
+
+def test_from_file_hdulist_of_a_file_has_its_abspath(tmp_path: pathlib.Path) -> None:
+    path = write_fits(tmp_path / 'lor_test.fit')
+    assert NewHorizonsLORRI.from_file(fits.open(path)).abspath == path.resolve()
 
 
 def test_from_file_rejects_an_hdulist_of_another_instrument(
@@ -1319,15 +1340,11 @@ ROW_IMAGE = ('volumes/NHxxLO_xxxx/NHJULO_2001/data/20070110_003071/'
 ROW_INDEX = 'metadata/NHxxLO_xxxx/NHJULO_2001/NHJULO_2001_index.lbl'
 
 
-def test_from_index_local_image_has_abspath(tmp_path: pathlib.Path) -> None:
+# An index read does not read the FITS file, so even a local one is not given as abspath
+def test_from_index_local_image_has_no_abspath(tmp_path: pathlib.Path) -> None:
     image = tmp_path / ROW_IMAGE
     image.parent.mkdir(parents=True)
     image.write_bytes(b'')
-    (obs,) = NewHorizonsLORRI.from_index(tmp_path / ROW_INDEX, row_dicts=[row()])
-    assert obs.abspath == image.resolve()
-
-
-def test_from_index_missing_local_image_has_no_abspath(tmp_path: pathlib.Path) -> None:
     (obs,) = NewHorizonsLORRI.from_index(tmp_path / ROW_INDEX, row_dicts=[row()])
     assert 'abspath' not in obs.subfields
 
@@ -1337,18 +1354,6 @@ def test_from_index_creates_no_directories(tmp_path: pathlib.Path) -> None:
     (holdings / ROW_INDEX).parent.mkdir(parents=True)
     list(NewHorizonsLORRI.from_index(holdings / ROW_INDEX, row_dicts=[row()]))
     assert not (holdings / 'volumes').exists()
-
-
-# An index read leaves the FITS file unfetched, so only an earlier read can have cached it
-def test_from_index_remote_image_has_no_abspath() -> None:
-    (obs,) = NewHorizonsLORRI.from_index('https://h.org/' + ROW_INDEX, row_dicts=[row()])
-    assert 'abspath' not in obs.subfields
-
-
-def test_from_index_remote_image_in_the_cache_has_abspath() -> None:
-    cached = cache_file('https://h.org/' + ROW_IMAGE)
-    (obs,) = NewHorizonsLORRI.from_index('https://h.org/' + ROW_INDEX, row_dicts=[row()])
-    assert obs.abspath == cached.resolve()
 
 
 # The supplement is required, so None is refused rather than taken as "search for it"
@@ -1379,9 +1384,7 @@ def test_from_index_uses_a_given_label(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_from_index_rejects_an_unknown_keyword() -> None:
-    with pytest.raises(oops.OopsTypeError,
-                       match=r"unexpected keyword argument for "
-                             r"NewHorizonsLORRI\.from_index: 'supplementary'"):
+    with pytest.raises(TypeError, match=r"unexpected keyword argument 'supplementary'"):
         NewHorizonsLORRI.from_index(INDEX, supplementary=SUPPLEMENT)
 
 

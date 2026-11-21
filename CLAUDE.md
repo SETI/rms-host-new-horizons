@@ -39,8 +39,9 @@ described below.
   so adding, renaming or re-signing a public member means updating
   `host_new_horizons/__init__.pyi` in the same change. The `[tool.mypy] exclude`, the
   override list in `pyproject.toml` and `.stubtest-allowlist` keep it off the stub-less
-  modules. The `type: ignore[override]` comment is a real mismatch with `oops.Host`:
-  `from_file` names its first parameter `fileinfo`.
+  modules. The two `type: ignore[override]` comments are real mismatches with
+  `oops.Host`: `from_file` names its first parameter `fileinfo`, and neither `from_file`
+  nor `from_index` takes the `**kwargs` that `oops.Host` declares.
 - `docs/conf.py` resolves the short class names in docstrings (`FCPath`, `Observation`,
   ...) through intersphinx with `_SHORT_NAMES`. Add a name there when a nitpicky build
   reports a class from another RMS package.
@@ -127,20 +128,26 @@ described below.
   data away while the camera's Cmatrix still works, and `spice_check_times()` in
   `tests/oops/test_lorri_merge.py` records the times at which the check evaluates it.
 - `from_file()` and `from_index()` both refuse a `select` other than None
-  (`oops.Host._check_select()`, `OopsValueError`) and any keyword they do not take
-  (`oops.Host._check_keywords()`, `OopsTypeError`) at call time. `abspath` is given only
-  for a file that exists locally or in the cache, by `oops.Host._apply_overrides()`; the
-  host has no path code of its own (each row's file is `oops.Host._index_file_path()`
+  (`oops.Host._check_select()`, `OopsValueError`) at call time; neither takes
+  `**kwargs`, so Python's own `TypeError` reports an unknown keyword. `abspath` is given
+  only by a read of the FITS file's arrays: `from_file()` passes `hdulist.filename()`
+  (for a remote file, the path that oops's `FCPath.retrieve()` returned) as `abspath=` to
+  `oops.Host._apply_overrides()`. An astrometry read and `from_index()` leave it out, so
+  their Snapshots lack `abspath`, even for a local or cached file. The host has no
+  path code of its own (each row's file is `oops.Host._index_file_path()`
   with the FITS suffix), and reading never creates a directory. Parsed content that
   was not read from a file has no path subfields; a full read of such a Pds3Label raises
   `HostFormatError`.
 - `from_index()` reads the index through `oops.Host._index_rows()`, the only code that
-  reads a table. The call reads only the two labels; the iteration reads both tables a
-  few rows at a time (pdstable's `iter_dicts`) and builds each row's Snapshot when it
-  reaches the row, so memory stays the same however long the index is: peak RSS 163 MB
-  over the 1,119 rows of NHJULO_1001 and 166 MB over the 21,753 rows of NHxxLO_1999, and
-  166 MB over the 9,641 rows of NHKELO_2001, every one of which gets a SpiceErrorFrame
-  (2026-11-19, rms-oops 191800d, whose frame cache keeps only registered frames). It is
+  reads a table. The call reads only the two labels; the iteration reads both tables 100
+  rows at a time (oops's `CHUNK_ROWS`, through pdstable's `iter_dicts`) and builds each
+  row's Snapshot when it reaches the row. Memory stays the same however long the index
+  is only with the frame and path cache fix of SETI/rms-oops#252, which the CI does not
+  install: with it, peak RSS was 163 MB over the 1,119 rows of NHJULO_1001, 166 MB over
+  the 21,753 rows of NHxxLO_1999, and 166 MB over the 9,641 rows of NHKELO_2001, every
+  one of which gets a SpiceErrorFrame (2026-11-19, rms-oops 191800d). Without it, each
+  row keeps its camera frame in the oops caches, a few KB per row (about 13 KB for a
+  row with a SpiceErrorFrame). It is
   not a generator function, which would defer the argument and label errors to the
   first `next()`.
   `supplement` defaults to `oops.Host.SUPPLEMENT` (the one beside the index, which must
@@ -153,9 +160,11 @@ described below.
   lists `lor_0035089864_0x632_eng` out of place, last, instead of at row 679 (counting
   from 1), where the supplement, which is in file order, has it; in the cumulative
   NHxxLO_1999 the two tables differ from row 1,925 on for the same reason. The other 14 of the 16 metadata
-  indexes are in step, and pairing by file gives them the same rows. oops would choose
-  the same key, but the explicit key makes it refuse a table without VOLUME_ID at call
-  time instead of pairing by FILE_SPECIFICATION_NAME alone. A row of `row_dicts` (or a
+  indexes are in step, and pairing by file gives them the same rows. The key must carry
+  `VOLUME_ID`, which oops's default key (FILE_SPECIFICATION_NAME alone) does not: the
+  cumulative NHxxLO_1999 and NHxxLO_2999 tables list four products twice, once for
+  NHKELO and once for NHK2LO, under one FILE_SPECIFICATION_NAME. The explicit key also
+  makes oops refuse a table without VOLUME_ID at call time. A row of `row_dicts` (or a
   null value) without either key column raises `HostFormatError` when the iteration
   reaches it (`_snapshot_from_row()`).
   Only the file key is compared (`validate=()`), and the supplement wins every shared column

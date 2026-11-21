@@ -10,12 +10,14 @@ volume's images one at a time.
 It returns an iterator, which gives the Snapshots row by row, in the order of the index.
 The call itself checks the arguments and reads the PDS3 labels of the index and its
 supplement, so a wrong argument or a label that cannot be read raises an error at once.
-The rows are read as the iteration proceeds, a few at a time, and each row's Snapshot is
-built when the iteration reaches that row. The memory used stays the same however long
-the index is. An error in a row is raised when the iteration reaches it, after the rows
-before it have been given. The one exception is a row longer than the label says, which
-is found as the rows are read, ten at a time: its error comes at the first of those ten
-rows. The iteration ends at the row that raises, and the rows after it are not built.
+The rows are read as the iteration proceeds, 100 at a time, and each row's Snapshot is
+built when the iteration reaches that row, so neither table is held in memory whole. The
+memory used stays the same however long the index is when OOPS releases each row's
+camera frame along with its Snapshot; an OOPS that keeps those frames adds a few
+kilobytes for each row. An error in a row is raised when the iteration reaches it, after
+the rows before it have been given. The one exception is a row longer than the label
+says, which is found as the rows are read: its error comes at the first of the 100 rows
+read with it. The iteration ends at the row that raises, and the rows after it are not built.
 The ``filter`` argument, described below, can leave such a row out. To build
 every row at once, pass the iterator to ``list()``:
 
@@ -159,9 +161,9 @@ the location of the index:
   directories are in the matching ``volumes`` tree, ``.../volumes/NHxxLO_xxxx``.
 - For an index anywhere else, they are in the index's own directory.
 
-The row's ``VOLUME_ID`` and file specification complete the path. ``abspath`` is present
-only when the FITS file exists locally or is already in the local cache. Building the
-Snapshots leaves the file system as it was: it does not create directories.
+The row's ``VOLUME_ID`` and file specification complete the path. The Snapshots lack
+``abspath``, because reading an index does not read the FITS files, even local ones.
+Building the Snapshots leaves the file system as it was: it does not create directories.
 
 Reading an index through oops.Host
 ==================================

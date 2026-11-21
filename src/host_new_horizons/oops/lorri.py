@@ -116,11 +116,13 @@ _FITS_FILL = -1.e32
 _SCLK_TICKS = 50000
 
 # The columns that identify the same image in an index and its supplement, by which the
-# two tables are paired (see MERGE_SUPPLEMENT_BY_FILE). oops would choose the same key
-# from these tables, but it pairs tables without VOLUME_ID by FILE_SPECIFICATION_NAME
-# alone, and the host needs VOLUME_ID for the path of each row's file. Giving the key
-# makes oops refuse a table that lacks either column when from_index() is called; a row
-# of `row_dicts` that lacks either raises HostFormatError when the iteration reaches it.
+# two tables are paired (see MERGE_SUPPLEMENT_BY_FILE). The key needs VOLUME_ID, which
+# oops leaves out of its default key: the cumulative tables of NHxxLO_1999 and
+# NHxxLO_2999 list four products twice, once for NHKELO and once for NHK2LO, under the
+# same FILE_SPECIFICATION_NAME. The host also needs VOLUME_ID for the path of each row's
+# file. Giving the key makes oops refuse a table that lacks either column when
+# from_index() is called; a row of `row_dicts` that lacks either raises HostFormatError
+# when the iteration reaches it.
 _INDEX_KEYS = ('VOLUME_ID', 'FILE_SPECIFICATION_NAME')
 
 # The names that the index and the supplement give five moons of Jupiter, and the names
@@ -310,7 +312,7 @@ class NewHorizonsLORRI(oops.Host):
                   return_all_planets=False, pds3_options=None, astrometry=False,
                   select=None, target=None, lightsource=None, path=None, frame=None,
                   cadence=None, fov=None, calibrations=None, timeshift=None,
-                  navigation=None, tracker=None, parallel=None, **kwargs):
+                  navigation=None, tracker=None, parallel=None):
         """A Snapshot object based on a given New Horizons LORRI image file.
 
         What is read depends on the input:
@@ -424,7 +426,6 @@ class NewHorizonsLORRI(oops.Host):
                 time, different frame and FOV) relative to which this Observation has a
                 fixed offset. Note that no more than one of `parallel` and `tracker` can
                 be specified.
-            **kwargs: Any other keyword argument raises an error.
 
         Returns:
             Snapshot: The observation, with subfields `dict`, `host`, `instrument`,
@@ -434,10 +435,11 @@ class NewHorizonsLORRI(oops.Host):
             - `filepath`, `basename` and `image_url`: the FITS file, as a path or URL,
               even when a label was given; absent for parsed content that was not read
               from a file.
-            - `abspath`: the FITS file's local path, if the file is local or in the
-              local cache. An astrometry read of a remote label leaves the FITS file
-              unfetched, so `abspath` is then absent unless an earlier read put the file
-              in the cache.
+            - `abspath`: the local path of the FITS file whose pixels this call read:
+              the file itself if it is local, or the copy that the read retrieved into
+              the local cache if it is remote. An astrometry read leaves the pixels
+              unread, so `abspath` is then absent, as it is for an HDUList built in
+              memory.
             - `time_from_sclk`: True if the sources lack the start time, so that it comes
               from SPACECRAFT_CLOCK_START_COUNT through the spacecraft clock kernel;
               False otherwise.
@@ -497,7 +499,6 @@ class NewHorizonsLORRI(oops.Host):
                 when `frame` is given or `pointing` is not "spice". Also raised if no
                 source gives the start time and the spacecraft clock kernel cannot
                 convert the clock count.
-            oops.OopsTypeError: If a keyword argument is not one of those listed.
             oops.OopsValueError: If `geom`, `pointing` or `fov_type` is not one of the
                 values listed above, if `select` is not None, if `geom` or `pointing` is
                 not "spice" in an astrometry read of a PDS3 label, which leaves the FITS
@@ -515,9 +516,9 @@ class NewHorizonsLORRI(oops.Host):
             oops.host.WrongHostError: If `fileinfo` is not a New Horizons LORRI PDS3 label
                 or FITS file.
             OSError: If the file cannot be read.
+            TypeError: If a keyword argument is not one of those listed.
         """
 
-        NewHorizonsLORRI._check_keywords('from_file', kwargs)
         oops.Host._check_select(select, unit='New Horizons LORRI file')
         NewHorizonsLORRI._check_option('geom', geom, _GEOMS)
         NewHorizonsLORRI._check_option('pointing', pointing, _POINTINGS)
@@ -599,19 +600,24 @@ class NewHorizonsLORRI(oops.Host):
                                                    f'FITS file: {name}')
 
         # Everything needed is copied out of the file, which is then closed, including
-        # an HDUList that oops.Host.from_file() or the caller opened
+        # an HDUList that oops.Host.from_file() or the caller opened. A read of the
+        # arrays has the FITS file locally, at the path that the HDUList was opened from
+        # (for a remote file, the path that FCPath.retrieve() returned), and only that
+        # path is given as `abspath`.
         headers = None
         arrays = None
+        abspath = None
         if hdulist is not None:
             try:
                 headers = [hdu.header.copy() for hdu in hdulist]
                 if not astrometry:
                     arrays = NewHorizonsLORRI._read_arrays(hdulist)
+                    abspath = hdulist.filename()
             finally:
                 hdulist.close()
 
-        return NewHorizonsLORRI._make_snapshot(filepath, label=label, headers=headers,
-                                               arrays=arrays, geom=geom,
+        return NewHorizonsLORRI._make_snapshot(filepath, abspath=abspath, label=label,
+                                               headers=headers, arrays=arrays, geom=geom,
                                                pointing=pointing, fov_type=fov_type,
                                                return_all_planets=return_all_planets,
                                                overrides=overrides)
@@ -621,15 +627,17 @@ class NewHorizonsLORRI(oops.Host):
                    row_dicts=None, pds3_options=None, filter=None, fov_type='fast',
                    return_all_planets=False, select=None, target=None, lightsource=None,
                    path=None, frame=None, cadence=None, fov=None, calibrations=None,
-                   timeshift=None, navigation=None, tracker=None, parallel=None,
-                   **kwargs):
+                   timeshift=None, navigation=None, tracker=None, parallel=None):
         """An iterator over Snapshots, one for each row of a New Horizons LORRI index.
 
         It reads a Ring-Moon Systems Node metadata index and its supplement. When this
         method is called, it checks the arguments and reads only the labels of the index
-        and the supplement. The iteration then reads the two tables a few rows at a time,
+        and the supplement. The iteration then reads the two tables 100 rows at a time,
         through ``oops.Host._index_rows()``, and builds each row's Snapshot when it
-        reaches that row, so the memory used stays the same however long the index is.
+        reaches that row, so the tables are never held in memory whole. The memory used
+        stays the same however long the index is only with an rms-oops whose frame and
+        path caches release each row's camera frame along with its Snapshot; with one
+        whose caches keep them, each row adds a few kilobytes.
 
         Each index row is paired with the supplement row that gives the same VOLUME_ID
         and FILE_SPECIFICATION_NAME (:attr:`MERGE_SUPPLEMENT_BY_FILE` is True), because
@@ -702,20 +710,19 @@ class NewHorizonsLORRI(oops.Host):
                 time, different frame and FOV) relative to which this Observation has a
                 fixed offset. Note that no more than one of `parallel` and `tracker` can
                 be specified.
-            **kwargs: Any other keyword argument raises an error.
 
         Returns:
             collections.abc.Iterator[Snapshot]: One observation per filtered row of the
             index, in the index's order, each with subfields `dict`, `host`,
             `instrument`, `binning_mode`, `time_from_sclk`, `spice_kernels`, `filepath`,
             `basename`, `image_url`, `spice_to_frame`, `spice_frame_name` and
-            `spice_frame_id` inserted, `abspath` if the FITS file is local or already in
-            the local cache, and `label_target`, `spacecraft_clock_start_count` and
-            `spacecraft_clock_stop_count` where the row gives TARGET_NAME and the clock
-            counts with values that do not count as missing, as for :meth:`from_file`.
-            The calibrations are empty, because the tables lack RSOLAR. The iteration
-            stops at the first row that raises an error; `filter` can leave such a row
-            out.
+            `spice_frame_id` inserted, and `label_target`,
+            `spacecraft_clock_start_count` and `spacecraft_clock_stop_count` where the
+            row gives TARGET_NAME and the clock counts with values that do not count as
+            missing, as for :meth:`from_file`. `abspath` is absent, because the FITS
+            file is not read. The calibrations are empty, because the tables lack
+            RSOLAR. The iteration stops at the first row that raises an error; `filter`
+            can leave such a row out.
 
             `dict` is the row, merged with its row of the supplement,
             without the masks of the table reader or NumPy types, so that it can be
@@ -740,8 +747,8 @@ class NewHorizonsLORRI(oops.Host):
             override and by a `timeshift` of the start/stop time ("T"), but a row
             without pointing still gives an observation, and its frame raises
             `oops.OopsSpiceError` when it is evaluated.
-            `filepath`, `basename`, `image_url`, and `abspath` name the FITS file, as a
-            full path or URL: the row's FILE_SPECIFICATION_NAME, with the label's
+            `filepath`, `basename`, and `image_url` name the FITS file, as a full path
+            or URL: the row's FILE_SPECIFICATION_NAME, with the label's
             suffix replaced by the FITS file's in the same case, in the volume directory
             named by its VOLUME_ID. The volume directories are found from the location
             of `filepath`: under "volumes" in place of "metadata" for an index in an RMS
@@ -755,9 +762,8 @@ class NewHorizonsLORRI(oops.Host):
             oops.OopsSpiceError: When the iteration reaches a row that lacks
                 START_TIME, if the spacecraft clock kernel cannot convert its
                 SPACECRAFT_CLOCK_START_COUNT.
-            oops.OopsTypeError: When this method is called, if a keyword argument is not
-                one of those listed; when the iteration reaches a row, if a range in
-                `filter` cannot be compared with that row's value.
+            oops.OopsTypeError: When the iteration reaches a row, if a range in `filter`
+                cannot be compared with that row's value.
             oops.OopsValueError: When this method is called, if `fov_type` is not
                 "fast", "slow" or "flat", if `select` is not None, if `filter` uses a
                 column that neither table has, or if a value in `pds3_options` is
@@ -776,7 +782,7 @@ class NewHorizonsLORRI(oops.Host):
                 FILE_SPECIFICATION_NAME. During the iteration:
                 after the last row that a table file holds, if it holds fewer rows than
                 its label says; for a row longer than the label's row length, when the
-                iteration reaches the first of the ten rows read with it, so those ten
+                iteration reaches the first of the 100 rows read with it, so those 100
                 rows are not given; when the supplement gives a file a second time while
                 the row with its first copy is still unpaired; when the whole supplement
                 has been read without finding the file of an index row; and, after the
@@ -789,9 +795,10 @@ class NewHorizonsLORRI(oops.Host):
                 New Horizons LORRI index.
             OSError: When this method is called, if the label of `filepath`, or of a
                 `supplement` that is specified, does not exist or cannot be read.
+            TypeError: When this method is called, if a keyword argument is not one of
+                those listed.
         """
 
-        NewHorizonsLORRI._check_keywords('from_index', kwargs)
         oops.Host._check_select(select, unit='row of a New Horizons LORRI index')
         NewHorizonsLORRI._check_option('fov_type', fov_type, _FOV_TYPES)
 
@@ -938,14 +945,16 @@ class NewHorizonsLORRI(oops.Host):
         return arrays
 
     @staticmethod
-    def _make_snapshot(filepath, *, label, headers, arrays, geom, pointing, fov_type,
-                       return_all_planets, overrides):
+    def _make_snapshot(filepath, *, abspath, label, headers, arrays, geom, pointing,
+                       fov_type, return_all_planets, overrides):
         """A Snapshot built from a PDS3 label, the headers and arrays of a FITS file, or
         both.
 
         Parameters:
             filepath (FCPath | None): The path to the FITS file; None for parsed content
                 that was not read from a file.
+            abspath (str | None): The local path of the FITS file whose arrays were read;
+                None if they were not read from a local file.
             label (Pds3Label | None): The detached label; None if it was not read.
             headers (list[astropy.io.fits.Header] | None): The header of every HDU; None
                 if the FITS file was not read.
@@ -1053,7 +1062,7 @@ class NewHorizonsLORRI(oops.Host):
             'calibrations': [],         # TBD
         }
 
-        oops.Host._apply_overrides(params, filepath, **overrides)
+        oops.Host._apply_overrides(params, filepath, abspath=abspath, **overrides)
 
         # The I/F calibration of a calibrated product, for the target and at the midtime
         # that the overrides leave

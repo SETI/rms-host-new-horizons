@@ -313,9 +313,11 @@ def fake_spice(monkeypatch: pytest.MonkeyPatch) -> FakeSpice:
     monkeypatch.setattr(oops.path, 'SpicePath', spice_path)
     monkeypatch.setattr(oops.frame, 'SpiceFrame', spice_frame)
 
-    # Each copy is made from items(): the pools are WeakValueDictionary objects, and
-    # dict(pool) can raise KeyError when garbage collection removes a member during the
-    # copy, which iterating over items() defers until the copy is made
+    # Each copy is made from items(). With the frame and path cache fix of rms-oops
+    # (SETI/rms-oops#252), the pools are WeakValueDictionary objects, and dict(pool) can
+    # raise KeyError when garbage collection removes a member during the copy, which
+    # iterating over items() defers until the copy is made; without it they are plain
+    # dictionaries, which items() copies just as well
     monkeypatch.setattr(oops.Path, '_PATH_REGISTRY',
                         dict(oops.Path._PATH_REGISTRY.items()))
     monkeypatch.setattr(oops.Path, '_PATH_CACHE', dict(oops.Path._PATH_CACHE.items()))

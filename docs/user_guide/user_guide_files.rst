@@ -59,11 +59,10 @@ astrometry read does not look for the file, so its path subfields give the name 
 case of the label's own name, whatever its suffix.
 
 The ``filepath``, ``basename``, ``abspath``, and ``image_url`` subfields always give the
-FITS file, also when the input is the label. ``abspath`` is the file's local path, and
-it is present only when that file exists: a local file, or a remote one that a read has
-put in the local cache. After an astrometry read of a remote label, the FITS file has
-not been retrieved, so ``abspath`` is absent unless an earlier read put the file in the
-cache.
+FITS file, also when the input is the label. ``abspath`` is the local path of the FITS
+file whose pixels the read took: the file itself if it is local, or the copy that the
+read downloaded into the local cache if it is remote. An astrometry read leaves the
+pixels unread, so its Snapshot lacks ``abspath``, even when the FITS file is local.
 
 Parsed input
 ============

@@ -34,7 +34,9 @@ from oops.path import Path
 __all__ = ['NewHorizonsLORRI']
 
 class NewHorizonsLORRI(Host):
-    # The runtime names the first parameter `fileinfo`, where Host names it `filepath`.
+    # The runtime names the first parameter `fileinfo`, where Host names it `filepath`,
+    # and does not take **kwargs, where Host does, so that Python refuses a keyword not
+    # listed.
     # A missing or unreadable file raises OSError (FileNotFoundError for a FITS file that
     # a label names but that does not exist). A file whose content cannot be parsed or
     # used raises oops.host.HostFormatError, or its subclass PdsHostError for a label
@@ -43,9 +45,9 @@ class NewHorizonsLORRI(Host):
     # C-kernel pointing is missing raises oops.OopsSpiceError, whose message ends with the
     # SPICE error code, such as "SPICE(NOFRAMECONNECT)"; never when `frame` is given or
     # `pointing` is not "spice". A select other than None raises oops.OopsValueError, and
-    # any keyword not listed raises oops.OopsTypeError. from_index checks the pointing of
-    # each row only to give a row without it a frame that raises oops.OopsSpiceError when
-    # it is evaluated.
+    # any keyword not listed raises TypeError. from_index checks the pointing of each row
+    # only to give a row without it a frame that raises oops.OopsSpiceError when it is
+    # evaluated.
     @staticmethod
     def from_file(  # type: ignore[override]
         fileinfo: str | pathlib.Path | FCPath | Pds3Label | HDUList, *,
@@ -59,16 +61,17 @@ class NewHorizonsLORRI(Host):
         calibrations: Calibration | list[Calibration] | None = None,
         timeshift: tuple[float, str] | None = None,
         navigation: tuple[float, ...] | None = None, tracker: str | None = None,
-        parallel: Observation | None = None, **kwargs: Any) -> Snapshot: ...
+        parallel: Observation | None = None) -> Snapshot: ...
     # Every row is one Snapshot of a Ring-Moon Systems Node metadata index, read with its
     # supplement. supplement=None without row_dicts raises oops.host.HostIndexError, a
     # select other than None raises oops.OopsValueError, and any keyword not listed
-    # raises oops.OopsTypeError. The call reads only the labels; the iterator reads the
-    # index and its supplement a few rows at a time, pairs each index row with the
-    # supplement row of the same file, and builds each row's Snapshot when it reaches
-    # the row.
+    # raises TypeError. The call reads only the labels; the iterator reads the index and
+    # its supplement 100 rows at a time, pairs each index row with the supplement row of
+    # the same file, and builds each row's Snapshot when it reaches the row. Host takes
+    # **kwargs here too, and the runtime does not, so that Python refuses a keyword not
+    # listed.
     @staticmethod
-    def from_index(
+    def from_index(  # type: ignore[override]
         filepath: str | pathlib.Path | FCPath, *,
         supplement: str | pathlib.Path | FCPath | object | None = ...,
         label: Pds3Label | None = None,
@@ -83,7 +86,7 @@ class NewHorizonsLORRI(Host):
         calibrations: Calibration | list[Calibration] | None = None,
         timeshift: tuple[float, str] | None = None,
         navigation: tuple[float, ...] | None = None, tracker: str | None = None,
-        parallel: Observation | None = None, **kwargs: Any) -> Iterator[Snapshot]: ...
+        parallel: Observation | None = None) -> Iterator[Snapshot]: ...
     @staticmethod
     def initialize(*, asof: str | None = None, meta: str | None = None,
         planets: int | Sequence[int] | None = None,

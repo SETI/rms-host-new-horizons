@@ -12,7 +12,7 @@ import julian
 import oops
 import pytest
 from astropy.io import fits
-from conftest import FITS_HEADER, FakeSpiceFrame, cache_file, write_fits, write_label
+from conftest import FITS_HEADER, FakeSpiceFrame, write_fits, write_label
 from filecache import FCPath
 from pdsparser import Pds3Label
 
@@ -202,14 +202,6 @@ def test_label_astrometry_on_a_remote_label_names_no_local_file(
     obs = NewHorizonsLORRI.from_file(remote_label(tmp_path), astrometry=True)
     assert 'abspath' not in obs.subfields
     assert obs.image_url == 'https://example.org/volume/lor_test.fit'
-
-
-# An earlier read put the FITS file in the local cache
-def test_label_astrometry_on_a_remote_label_names_the_cached_file(
-        tmp_path: pathlib.Path) -> None:
-    cached = cache_file('https://example.org/volume/lor_test.fit')
-    obs = NewHorizonsLORRI.from_file(remote_label(tmp_path), astrometry=True)
-    assert obs.abspath == cached.resolve()
 
 
 def test_parsed_label_of_another_instrument(tmp_path: pathlib.Path) -> None:

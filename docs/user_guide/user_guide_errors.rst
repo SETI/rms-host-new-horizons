@@ -46,7 +46,7 @@ Reading an image file
     None; ``geom`` or ``pointing`` asks for the FITS header in an astrometry read of a
     PDS3 label; or ``pds3_options`` holds an option that the parser does not accept.
 
-:exc:`~oops.OopsTypeError`
+:exc:`TypeError`
     A keyword argument is not one that the method accepts.
 
 :exc:`OSError`
@@ -63,7 +63,7 @@ Reading a PDS3 index
     label does not describe an index table with the columns ``VOLUME_ID`` and
     ``FILE_SPECIFICATION_NAME``. Raised during the iteration: after the last row of a
     table file that holds fewer rows than its label says; for a row longer than its
-    label's row length, at the first of the ten rows read with it, so those ten rows
+    label's row length, at the first of the 100 rows read with it, so those 100 rows
     are not built; for an index row whose image the supplement does not list, once the
     whole supplement has been read; or for a supplement row that lists an image a second
     time while its first row is still being kept. Raised after the last row: a table
@@ -88,9 +88,11 @@ Reading a PDS3 index
     error is raised when the iteration reaches that row.
 
 :exc:`~oops.OopsTypeError`
-    A keyword argument is not one that the method accepts. A range in ``filter`` that
-    cannot be compared with a row's value raises this error when the iteration reaches
-    that row.
+    A range in ``filter`` cannot be compared with a row's value. This error is raised
+    when the iteration reaches that row.
+
+:exc:`TypeError`
+    A keyword argument is not one that the method accepts, which the call itself finds.
 
 :exc:`~oops.OopsValueError`
     ``fov_type`` is not one of its values, ``select`` is not None, ``filter`` asks for a

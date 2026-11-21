@@ -157,7 +157,8 @@ from every label read.
        :doc:`user_guide_geometry`).
    * - ``filepath``, ``basename``, ``abspath``, ``image_url``
      - The FITS file, absent for a parsed label or FITS file that was not read from a
-       file (see :doc:`user_guide_files`).
+       file; ``abspath`` is present only when the read took the image's pixels (see
+       :doc:`user_guide_files`).
 
 The spacecraft clock counts
 ===========================
