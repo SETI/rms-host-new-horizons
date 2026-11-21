@@ -68,7 +68,9 @@ class NewHorizonsLORRI(Host):
     # any keyword not listed raises TypeError. The call reads only the labels; the
     # iterator reads the index and its supplement 100 rows at a time, pairs each index
     # row with the supplement row of the same file, and builds each row's Snapshot when
-    # it reaches the row. Host takes **kwargs here too, and the runtime does not, so that
+    # it reaches the row. Rows given in row_dicts take the place of the tables: the call
+    # then reads neither label, so the checks of the labels, the host and pds3_options
+    # are not made. Host takes **kwargs here too, and the runtime does not, so that
     # Python refuses a keyword not listed; and Host accepts other values of select.
     @staticmethod
     def from_index(  # type: ignore[override]
