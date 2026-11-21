@@ -642,6 +642,13 @@ class NewHorizonsLORRI(oops.Host):
         path caches release each row's camera frame along with its Snapshot; with one
         whose caches keep them, each row adds a few kilobytes.
 
+        With `row_dicts`, the given rows take the place of the tables, and the call does
+        not read either label. The errors below that come from reading a label or a table
+        are then never raised: neither label need exist, the index need not be New
+        Horizons LORRI, the name of `filepath` need not contain "_index", and
+        `pds3_options` is not checked. What is still checked is `select`, `fov_type`,
+        `filter` against the first row, and each row when the iteration reaches it.
+
         Each index row is paired with the supplement row that gives the same VOLUME_ID
         and FILE_SPECIFICATION_NAME (:attr:`MERGE_SUPPLEMENT_BY_FILE` is True), because
         the index of NHJULO_1001, and so the cumulative index NHxxLO_1999, lists one file
@@ -672,7 +679,9 @@ class NewHorizonsLORRI(oops.Host):
             row_dicts (collections.abc.Iterable[dict[str, Any]], optional): The rows of
                 the index, each already merged with its supplement row, as a list or any
                 other iterable, which is read as the iteration proceeds. If they are
-                given, `supplement` and `label` are ignored.
+                given, they are used in place of the tables, `supplement`, `label` and
+                `pds3_options` are ignored, and neither the tables nor their labels are
+                read.
             pds3_options (dict[str, Any], optional): Any keyword arguments and their
                 values to be passed to the :class:`~pdsparser.Pds3Label` parser. The
                 options are checked when the call is made, unless `row_dicts` is given,
@@ -825,6 +834,8 @@ class NewHorizonsLORRI(oops.Host):
                                            f'supplemental index: {filepath}')
 
         # Only the labels are read here; the rows are read as the iteration reaches them.
+        # Given rows are used as they are: _index_rows() returns them before it reads
+        # either label, so the label checks are not made.
         # The other columns that the two tables share, besides the file key, are written
         # differently: the index gives each clock count with its partition, as in
         # "1/0030598438:48850", rounds the stop count differently from the label, gives

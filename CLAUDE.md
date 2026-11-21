@@ -164,6 +164,11 @@ described below.
   `supplement` defaults to `oops.Host.SUPPLEMENT` (the one beside the index, which must
   then exist), and None or an empty string, which oops would take as "no supplement",
   raises `HostIndexError` unless `row_dicts` is given.
+  `_index_rows()` returns given `row_dicts` before it reads either label, so a direct
+  call with `row_dicts` skips every label check (existence, parsing, tables, host,
+  the "_index" name, `pds3_options`); only `select`, `fov_type`, `filter` (against the
+  first row) and each row are checked. `oops.Host.from_index()` still parses the index
+  label to pick the host.
   The host reads the Ring-Moon Systems Node metadata indexes and their supplements.
   Each row's path subfields name the FITS file in full, under
   `oops.Host._volumes_directory()` of the index's location.

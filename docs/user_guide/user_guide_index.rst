@@ -8,8 +8,9 @@ index tables and leaves the images unopened, which makes it much faster than ope
 volume's images one at a time.
 
 It returns an iterator, which gives the Snapshots row by row, in the order of the index.
-The call itself checks the arguments and reads the PDS3 labels of the index and its
-supplement, so a wrong argument or a label that cannot be read raises an error at once.
+Unless the rows are given in ``row_dicts``, described below, the call itself checks the
+arguments and reads the PDS3 labels of the index and its supplement, so a wrong argument
+or a label that cannot be read raises an error at once.
 The rows are read as the iteration proceeds, 100 at a time, and each row's Snapshot is
 built when the iteration reaches that row, so neither table is held in memory whole. The
 supplement rows read ahead of their own index rows are kept as well (see below), and in
@@ -95,8 +96,12 @@ Other arguments
 
 ``row_dicts``
     The rows themselves, one dictionary per row, each already merged with its
-    supplement row, as a list or any other iterable. The host then reads neither table,
-    and ``supplement`` and ``label`` are ignored.
+    supplement row, as a list or any other iterable. The host then reads neither the
+    tables nor their labels, and ``supplement``, ``label``, and ``pds3_options`` are
+    ignored, so the checks that need a label are skipped: the labels need not exist, the
+    index's file name need not hold ``_index``, and the index is not checked to be a New
+    Horizons LORRI index. ``fov_type``, ``select``, and ``filter`` are still checked, as
+    their entries say, and each row is checked when the iteration reaches it.
 
 ``filter``
     A dictionary of column names and the values to keep. A row is kept when each column
