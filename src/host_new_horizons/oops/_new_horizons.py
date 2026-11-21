@@ -56,8 +56,11 @@ class _NewHorizons:
         this function are ignored.
 
         Parameters:
-            asof (str, optional): Only use SPICE kernels that existed before this date;
-                None to ignore.
+            asof (str, optional): A date in ISO format. Each kernel is chosen from those
+                released on or before it, or, where the database does not hold one so
+                old, as if no date were given; for the C kernels, ValueError is raised
+                instead. The kernels that a metakernel lists are furnished whatever
+                their release dates. None to choose the newest kernels.
             meta (str, optional): The name of a metakernel to furnish instead of the
                 kernels selected from the database.
             planets (int | collections.abc.Sequence[int], optional): The planet number,
@@ -66,6 +69,9 @@ class _NewHorizons:
                 their moons. None or 0 means all nine.
             irregulars (bool, optional): True to include the irregular satellites; False
                 otherwise.
+
+        Raises:
+            ValueError: If no C kernel of the spacecraft was released by `asof`.
         """
 
         if _NewHorizons.initialized:
