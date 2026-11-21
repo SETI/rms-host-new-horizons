@@ -505,7 +505,8 @@ class NewHorizonsLORRI(oops.Host):
                 values listed above, if `select` is not None, if `geom` or `pointing` is
                 not "spice" in an astrometry read of a PDS3 label, which leaves the FITS
                 header unread, or if an option in `pds3_options` is not one the parser
-                accepts.
+                accepts while the method parses a PDS3 label file; the options are not
+                checked for a FITS file or for a Pds3Label passed in.
             oops.host.HostFormatError: If the image is not 1024 or 256 lines, if the
                 FITS file is not valid FITS, if a Pds3Label passed in was not read from a
                 file and `astrometry` is False, so that no file path is known for its
@@ -642,9 +643,9 @@ class NewHorizonsLORRI(oops.Host):
         path caches release each row's camera frame along with its Snapshot; with one
         whose caches keep them, each row adds a few kilobytes.
 
-        With `row_dicts`, the given rows take the place of the tables, and the call does
-        not read either label. The errors below that come from reading a label or a table
-        are then never raised: neither label need exist, the index need not be New
+        With `row_dicts`, the given rows take the place of the tables, and the call leaves
+        both labels unread. The errors below that come from reading a label or a table
+        are then never raised: the labels need not exist, the index need not be New
         Horizons LORRI, the name of `filepath` need not contain "_index", and
         `pds3_options` is not checked. What is still checked is `select`, `fov_type`,
         `filter` against the first row, and each row when the iteration reaches it.
@@ -680,10 +681,12 @@ class NewHorizonsLORRI(oops.Host):
                 the index, each already merged with its supplement row, as a list or any
                 other iterable, which is read as the iteration proceeds. If they are
                 given, they are used in place of the tables, `supplement`, `label` and
-                `pds3_options` are ignored, and neither the tables nor their labels are
-                read.
+                `pds3_options` are ignored, and the tables and their labels are left
+                unread.
             pds3_options (dict[str, Any], optional): Any keyword arguments and their
-                values to be passed to the :class:`~pdsparser.Pds3Label` parser.
+                values to be passed to the :class:`~pdsparser.Pds3Label` parser. They
+                are checked when the call parses the index label, which it does only if
+                neither `label` nor `row_dicts` is given.
             filter (dict[str, Any], optional): A dictionary of index column names and
                 their values or a set or tuple of values. If provided, only rows of the
                 index in which each named column equals the value, falls in the set of
@@ -787,7 +790,8 @@ class NewHorizonsLORRI(oops.Host):
             oops.OopsValueError: When this method is called, if `fov_type` is not
                 "fast", "slow" or "flat", if `select` is not None, if `filter` uses a
                 column that neither table has, or if a value in `pds3_options` is
-                invalid. With `row_dicts`, `filter` is checked against the first row:
+                invalid while neither `label` nor `row_dicts` is given. With
+                `row_dicts`, `filter` is checked against the first row:
                 when this method is called if `row_dicts` is a sequence, such as a
                 list, and otherwise when the iteration reads the first row.
             oops.host.HostFormatError: When the iteration reaches a row that lacks
@@ -797,7 +801,8 @@ class NewHorizonsLORRI(oops.Host):
                 and SPACECRAFT_CLOCK_START_COUNT.
             oops.host.HostIndexError: When this method is called, if `supplement` is None
                 or an empty string while `row_dicts` is not given; if `supplement` is
-                `oops.Host.SUPPLEMENT` and the name of `filepath` lacks "_index"; or if
+                `oops.Host.SUPPLEMENT` and the name of `filepath` lacks "_index" while
+                `row_dicts` is not given; or if
                 either label does not describe an index table with the columns VOLUME_ID
                 and FILE_SPECIFICATION_NAME. During the iteration:
                 after the last row that a table file holds, if it holds fewer rows than
@@ -1939,13 +1944,20 @@ class NewHorizonsLORRI(oops.Host):
         the first call, later calls to this function are ignored.
 
         Parameters:
-            asof (str, optional): A date in ISO format. Each kernel is chosen from those
-                released on or before it, or, where the database does not hold one so
-                old, as if no date were given; for the C kernels, ValueError is raised
-                instead. The kernels that a metakernel lists are furnished whatever
-                their release dates. None to choose the newest kernels.
-            meta (str, optional): The name of a metakernel to furnish instead of the
-                kernels selected from the database.
+            asof (str, optional): A date in ISO format. Each kernel is chosen from
+                those released before it, the leap seconds kernel included, and a query
+                of which every kernel was released on or after the date silently uses
+                the kernel it would choose without a date. A set of SP or C kernels keeps
+                only those released before the date, so the later part of the mission
+                can lack coverage. The C kernels and a metakernel named in the database
+                never fall back, and ValueError is raised instead. The LORRI instrument
+                kernel is chosen from the database by this date, also with `meta`. None
+                to choose the newest kernels.
+            meta (str, optional): The name of a metakernel in the database, or the path
+                to a metakernel file, to furnish instead of the kernels selected from the
+                database. A metakernel named in the database is the newest one released
+                before `asof`; a metakernel file is used whatever the date. The kernels
+                that it lists are furnished whatever their release dates.
             planets (int | collections.abc.Sequence[int], optional): The planet number,
                 1 to 9, or a sequence of planet numbers, such as (5, 9) for Jupiter and
                 Pluto, whose bodies :meth:`~oops.Body.define_solar_system` defines with
@@ -1955,7 +1967,10 @@ class NewHorizonsLORRI(oops.Host):
 
         Raises:
             oops.host.HostError: If the instrument kernel does not give a 1024x1024 image.
-            ValueError: If no C kernel of the spacecraft was released by `asof`.
+            ValueError: If `meta` is None and none of the spacecraft's C kernels was
+                released before `asof`, as for any date up to and including 2015-03-12;
+                or if `meta` names a metakernel in the database and none of that name
+                was released before `asof`.
         """
 
         # Quick exit after first call

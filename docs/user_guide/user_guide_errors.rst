@@ -45,7 +45,9 @@ Reading an image file
 :exc:`~oops.OopsValueError`
     ``geom``, ``pointing``, or ``fov_type`` is not one of its values; ``select`` is not
     None; ``geom`` or ``pointing`` asks for the FITS header in an astrometry read of a
-    PDS3 label; or ``pds3_options`` holds an option that the parser does not accept.
+    PDS3 label; or ``pds3_options`` holds an option that the parser does not accept. The
+    options are checked only when the method parses a PDS3 label file, so they are not
+    checked for a FITS file or for a label passed in already parsed.
 
 :exc:`TypeError`
     A keyword argument is not one that the method accepts.
@@ -56,11 +58,18 @@ Reading an image file
 Reading a PDS3 index
 ====================
 
-:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` raises:
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` raises the errors
+listed below. When the rows are given in ``row_dicts``, the call leaves the tables and
+their labels unread, so the errors that come from reading a label or a table are never
+raised: the labels need not exist or be readable, the index's file name need not
+contain ``_index``, the index is not checked to be a New Horizons LORRI index, and
+``pds3_options`` is not checked. The checks of ``select``, ``fov_type``, and ``filter``
+are still made, as their entries say, and so are those of each row.
 
 :exc:`~oops.host.HostIndexError`
-    Raised by the call itself: ``supplement`` is None and ``row_dicts`` is not given; the
-    index's file name holds no ``_index`` from which to find the supplement; or either
+    Raised by the call itself: ``supplement`` is None or an empty string, and
+    ``row_dicts`` is not given; ``supplement`` is left at its default, and the index's
+    file name lacks the ``_index`` from which the host finds the supplement; or either
     label does not describe an index table with the columns ``VOLUME_ID`` and
     ``FILE_SPECIFICATION_NAME``. Raised during the iteration: after the last row of a
     table file that holds fewer rows than its label says; for a row longer than its
@@ -98,7 +107,8 @@ Reading a PDS3 index
 :exc:`~oops.OopsValueError`
     ``fov_type`` is not one of its values, ``select`` is not None, ``filter`` asks for a
     column that neither table has, or ``pds3_options`` holds an option that the parser
-    does not accept. With ``row_dicts`` given as an iterable other than a list or
+    does not accept. The options are checked only when the call parses the index's
+    label, so they are not checked when ``label`` is given. With ``row_dicts`` given as an iterable other than a list or
     another sequence, a ``filter`` column that the first row lacks raises this error
     when the iteration reads that row.
 
