@@ -1420,12 +1420,12 @@ def test_from_index_rows_need_no_supplement() -> None:
 
 
 def test_from_index_with_given_rows_skips_the_labels(tmp_path: pathlib.Path) -> None:
-    """Given rows are used in place of the tables, so the call reads neither label: an
-    index label and a supplement that do not exist, and an option that the label parser
-    would refuse, still give the row's Snapshot."""
+    """Given rows are used in place of the tables, so the call leaves both labels unread
+    and does not look for the supplement: an index label that does not exist, a name
+    without the "_index" from which the default supplement would be found, and an option
+    that the label parser would refuse still give the row's Snapshot."""
 
-    obs = list(NewHorizonsLORRI.from_index(tmp_path / 'NHJULO_2001_index.lbl',
-                                           supplement=tmp_path / 'missing.lbl',
+    obs = list(NewHorizonsLORRI.from_index(tmp_path / 'NHJULO_2001.lbl',
                                            pds3_options={'bogus_option': 1},
                                            row_dicts=[row()]))
     assert len(obs) == 1

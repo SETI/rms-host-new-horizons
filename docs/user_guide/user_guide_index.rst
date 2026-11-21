@@ -62,7 +62,7 @@ The ``supplement`` argument chooses the supplemental index:
 - By default, the host reads the file beside the index whose name has
   ``_supplemental_index`` in place of ``_index``, in upper or lower case. That file must
   exist, and an index whose file name lacks ``_index`` raises
-  :exc:`~oops.host.HostIndexError`.
+  :exc:`~oops.host.HostIndexError`, unless ``row_dicts`` is given.
 - A path or URL reads that file instead.
 - None or an empty path raises :exc:`~oops.host.HostIndexError`, unless ``row_dicts`` is
   given.
@@ -96,8 +96,8 @@ Other arguments
 
 ``row_dicts``
     The rows themselves, one dictionary per row, each already merged with its
-    supplement row, as a list or any other iterable. The host then reads neither the
-    tables nor their labels, and ``supplement``, ``label``, and ``pds3_options`` are
+    supplement row, as a list or any other iterable. The host then leaves the tables
+    and their labels unread, and ``supplement``, ``label``, and ``pds3_options`` are
     ignored, so the checks that need a label are skipped: the labels need not exist, the
     index's file name need not hold ``_index``, and the index is not checked to be a New
     Horizons LORRI index. ``fov_type``, ``select``, and ``filter`` are still checked, as
