@@ -30,9 +30,11 @@ described below.
   (`-W -n`), codespell and PyMarkdown. `ruff format` is disabled.
   `.github/workflows/run-tests.yml` runs the same set. `scripts/setup-venv.sh` builds the
   `venv/` that the scripts expect; set `VENV` to use another.
-- The minimum rms-oops in `pyproject.toml` is 0.5.0, the first release with
-  `oops.OopsSpiceError` (the `oops.Host` API first appears in 0.4.0). Until 0.5.0 is on
-  PyPI, install rms-oops from its branch into the venv by hand.
+- Until rms-oops 0.5.0, the first release with `oops.OopsSpiceError` and the index
+  reader the host uses, is on PyPI, `pyproject.toml` installs rms-oops from the branch
+  of its open pull request, so that CI can run. That line becomes `rms-oops>=0.5.0`
+  once the release is out, and before this package is published, because PyPI refuses
+  a package with a direct URL dependency.
 - The type information is published in two stubs: `host_new_horizons/__init__.pyi`
   declares `NewHorizonsLORRI` in full, and `host_new_horizons/oops/__init__.pyi`
   re-exports it. `stubtest` checks them against the runtime in the check script and in CI,
@@ -40,8 +42,9 @@ described below.
   `host_new_horizons/__init__.pyi` in the same change. The `[tool.mypy] exclude`, the
   override list in `pyproject.toml` and `.stubtest-allowlist` keep it off the stub-less
   modules. The two `type: ignore[override]` comments are real mismatches with
-  `oops.Host`: `from_file` names its first parameter `fileinfo`, and neither `from_file`
-  nor `from_index` takes the `**kwargs` that `oops.Host` declares.
+  `oops.Host`: `from_file` names its first parameter `fileinfo`, neither `from_file`
+  nor `from_index` takes the `**kwargs` that `oops.Host` declares, and both type
+  `select` as None alone, since any other value raises.
 - `docs/conf.py` resolves the short class names in docstrings (`FCPath`, `Observation`,
   ...) through intersphinx with `_SHORT_NAMES`. Add a name there when a nitpicky build
   reports a class from another RMS package.
@@ -117,8 +120,9 @@ described below.
   to J2000, so the check reaches the SPICE frame `NH_LORRI_FLIPPED` beneath the camera's
   Cmatrix, at the midtime after the `cadence` override and a "T" `timeshift`. An "F"
   `timeshift` wraps the Cmatrix in a FrameShift, which shifts only the Cmatrix's own
-  fixed rotation, so the kernels are still read at that midtime. Whether "F" should
-  shift the whole chain is an open question in rms-oops (cited in the `#` comment in
+  fixed rotation, so the kernels are still read at that midtime. A `tracker` override
+  reads them once instead, at the start, midtime, or end that it selects (oops's
+  `_tracker_epoch()`). Whether "F" should shift the whole chain is an open question in rms-oops (cited in the `#` comment in
   `_check_pointing()`); the host follows what oops does. It does not check when `frame`
   is given or `pointing` is not "spice". `from_index()` makes the same check for each
   row with `defer=True`: a row without pointing gets an `oops.frame.SpiceErrorFrame`,
@@ -130,18 +134,25 @@ described below.
 - `from_file()` and `from_index()` both refuse a `select` other than None
   (`oops.Host._check_select()`, `OopsValueError`) at call time; neither takes
   `**kwargs`, so Python's own `TypeError` reports an unknown keyword. `abspath` is given
-  only by a read of the FITS file's arrays: `from_file()` passes `hdulist.filename()`
+  only by a read of the FITS file's arrays: `from_file()` passes the HDUList's file
   (for a remote file, the path that oops's `FCPath.retrieve()` returned) as `abspath=` to
-  `oops.Host._apply_overrides()`. An astrometry read and `from_index()` leave it out, so
+  `oops.Host._apply_overrides()`. `_hdulist_path()` gives that file for `abspath` and
+  for the `filepath` of an HDUList passed in: `hdulist.filename()` if it names a file,
+  and None for an HDUList built in memory or read from a stream, which astropy names
+  after the stream's type ("<class '_io.BytesIO'>"). An astrometry read and `from_index()` leave it out, so
   their Snapshots lack `abspath`, even for a local or cached file. The host has no
   path code of its own (each row's file is `oops.Host._index_file_path()`
   with the FITS suffix), and reading never creates a directory. Parsed content that
   was not read from a file has no path subfields; a full read of such a Pds3Label raises
   `HostFormatError`.
 - `from_index()` reads the index through `oops.Host._index_rows()`, the only code that
-  reads a table. The call reads only the two labels; the iteration reads both tables 100
+  reads a table. The call reads only the two labels (given the `.tab` path instead of
+  the label, pdsparser reads the whole table looking for an attached label before it
+  turns to the `.lbl` beside it); the iteration reads both tables 100
   rows at a time (oops's `CHUNK_ROWS`, through pdstable's `iter_dicts`) and builds each
-  row's Snapshot when it reaches the row. Memory stays the same however long the index
+  row's Snapshot when it reaches the row. Supplement rows read ahead of their index
+  rows are held until their partners come; in the 16 metadata index pairs at most one
+  is held at a time (2026-11-21 survey). Memory stays the same however long the index
   is only with the frame and path cache fix of SETI/rms-oops#252, which the CI does not
   install: with it, peak RSS was 163 MB over the 1,119 rows of NHJULO_1001, 166 MB over
   the 21,753 rows of NHxxLO_1999, and 166 MB over the 9,641 rows of NHKELO_2001, every
@@ -151,7 +162,8 @@ described below.
   not a generator function, which would defer the argument and label errors to the
   first `next()`.
   `supplement` defaults to `oops.Host.SUPPLEMENT` (the one beside the index, which must
-  then exist), and None raises `HostIndexError` unless `row_dicts` is given.
+  then exist), and None or an empty string, which oops would take as "no supplement",
+  raises `HostIndexError` unless `row_dicts` is given.
   The host reads the Ring-Moon Systems Node metadata indexes and their supplements.
   Each row's path subfields name the FITS file in full, under
   `oops.Host._volumes_directory()` of the index's location.

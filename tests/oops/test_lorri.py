@@ -555,6 +555,9 @@ def test_target_body(name: str | None, body: str) -> None:
 
 
 def test_from_file_target_comes_from_the_label_name(tmp_path: pathlib.Path) -> None:
+    """The label's TARGET_NAME, which wins over the header's SPCCBTNM, gives the target
+    body, and `label_target` keeps the label's spelling."""
+
     write_fits(tmp_path / 'lor_test.fit', SPCCBTNM='MU69')
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT',
                         TARGET_NAME='"ASTEROID 486958 (2014 MU69)"')
@@ -565,6 +568,8 @@ def test_from_file_target_comes_from_the_label_name(tmp_path: pathlib.Path) -> N
 
 def test_from_file_spice_kernels_of_the_target_body(tmp_path: pathlib.Path,
                                                     fake_spicedb: FakeSpiceDB) -> None:
+    """A moon's kernels are queried with those of its system barycenter, Jupiter's."""
+
     write_fits(tmp_path / 'lor_test.fit', SPCCBTNM='CALLIRRHOE')
     label = write_label(tmp_path / 'lor_test.lbl', 'LOR_TEST.FIT',
                         TARGET_NAME='"J17 CALLIRRHOE"')
@@ -648,6 +653,16 @@ def test_from_file_spice_kernels_query(tmp_path: pathlib.Path,
     assert kwargs['bodies'] == [5, 599]
 
 
+def test_from_file_spice_kernels_of_the_target_override(
+        tmp_path: pathlib.Path, fake_spicedb: FakeSpiceDB) -> None:
+    """The kernels are those of the target that the observation uses, Pluto, and not
+    those of the target that the file names, Jupiter."""
+
+    _ = load(tmp_path, target='PLUTO')
+    (_, kwargs) = fake_spicedb.named('used_basenames')[0]
+    assert kwargs['bodies'] == [9, 999]
+
+
 # The planets, Pluto included, each with its system barycenter
 ALL_PLANETS = [1, 199, 2, 299, 3, 399, 4, 499, 5, 599, 6, 699, 7, 799, 8, 899, 9, 999]
 
@@ -668,6 +683,16 @@ def test_from_index_return_all_planets(fake_spicedb: FakeSpiceDB) -> None:
                                          return_all_planets=True))
     (_, kwargs) = fake_spicedb.named('used_basenames')[0]
     assert kwargs['bodies'] == ALL_PLANETS
+
+
+def test_from_index_spice_kernels_of_the_target_override(
+        fake_spicedb: FakeSpiceDB) -> None:
+    """The kernels are those of the target that the observation uses, Pluto, and not
+    those of the row's target, Callirrhoe."""
+
+    _ = list(NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()], target='PLUTO'))
+    (_, kwargs) = fake_spicedb.named('used_basenames')[0]
+    assert kwargs['bodies'] == [9, 999]
 
 
 def test_from_file_default_geometry(tmp_path: pathlib.Path) -> None:
@@ -1091,8 +1116,15 @@ def test_from_index_builds_each_row_when_reached(monkeypatch: pytest.MonkeyPatch
     first = next(snapshots)
     assert len(built) == 1
     rest = list(snapshots)
-    assert len(rest) == 29
-    assert first.basename == 'lor_0030702839_0x630_sci.fit'
+    assert [obs.basename for obs in [first, *rest]] == index_basenames()
+
+
+def index_basenames() -> list[str]:
+    """The FITS file of each row of the edited index, in the order of its rows."""
+
+    lines = (TEST_FILES / 'NHJULO_2001_index_edited.tab').read_text().splitlines()
+    return [pathlib.PurePosixPath(line.split('","')[1].strip()).with_suffix('.fit').name
+            for line in lines]
 
 
 def test_from_index_uses_the_supplement_values() -> None:
@@ -1208,7 +1240,7 @@ def test_from_index_reads_no_table_when_called(tmp_path: pathlib.Path) -> None:
     index = copy_index(tmp_path)
     (tmp_path / 'NHJULO_2001_index_edited.tab').unlink()
     snapshots = NewHorizonsLORRI.from_index(index)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match=r'NHJULO_2001_index_edited\.tab'):
         next(snapshots)
 
 
@@ -1364,6 +1396,16 @@ def test_from_index_refuses_no_supplement() -> None:
         NewHorizonsLORRI.from_index(INDEX, supplement=None)
 
 
+def test_from_index_refuses_an_empty_supplement_path() -> None:
+    """An empty path is refused when the method is called, as None is, because the index
+    reader would read the index without its supplement."""
+
+    with pytest.raises(oops.host.HostIndexError,
+                       match=r'New Horizons LORRI index needs its supplemental index: '
+                             r'.*NHJULO_2001_index_edited\.lbl'):
+        NewHorizonsLORRI.from_index(INDEX, supplement='')
+
+
 def test_from_index_rows_need_no_supplement() -> None:
     assert len(list(NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()],
                                                 supplement=None))) == 1
@@ -1435,6 +1477,9 @@ def test_from_file_fits_pointing_needs_no_header_epoch(tmp_path: pathlib.Path) -
 
 def test_from_index_custom_frame_reports_no_cks(fake_spice: FakeSpice,
                                                 fake_spicedb: FakeSpiceDB) -> None:
+    """With a `frame` override, the SPICE frames are left undefined and the C kernels are
+    left out of `spice_kernels`."""
+
     (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row()], frame='J2000')
     assert obs.frame.frame_id == 'J2000'
     assert fake_spice.spice_frames == []
@@ -1443,6 +1488,9 @@ def test_from_index_custom_frame_reports_no_cks(fake_spice: FakeSpice,
 
 @pytest.mark.parametrize('null', ['N/A', 'UNK', None])
 def test_from_index_row_null_values(null: str | None) -> None:
+    """A null TARGET_NAME or clock count leaves out its subfield and its `dict` key, and
+    the target is "NONE"."""
+
     (obs,) = NewHorizonsLORRI.from_index(INDEX, row_dicts=[row(
         TARGET_NAME=null, SPACECRAFT_CLOCK_START_COUNT=null)])
     assert obs.target == 'NONE'

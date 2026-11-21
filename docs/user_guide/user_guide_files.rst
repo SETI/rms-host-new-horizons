@@ -121,8 +121,7 @@ The standard OOPS overrides, ``target``, ``lightsource``, ``path``, ``frame``,
 ``cadence``, ``fov``, ``calibrations``, ``timeshift``, ``navigation``, ``tracker``, and
 ``parallel``, replace what the host would otherwise build. They are listed with
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`. Any other keyword
-raises :exc:`~oops.OopsTypeError`, so that a misspelled argument is not silently
-ignored.
+raises :exc:`TypeError`, so that a misspelled argument is not silently ignored.
 
 Reading a label through oops.Host
 =================================

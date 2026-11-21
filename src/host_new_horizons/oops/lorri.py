@@ -494,11 +494,13 @@ class NewHorizonsLORRI(oops.Host):
                 the middle of `cadence` if it is given, moved by a `timeshift` of the
                 start/stop time ("T"). A `timeshift` of the frame ("F") shifts only the
                 camera's fixed rotation above the SPICE frame, so the kernels are read
-                at that same time. Its message gives the time and the FITS file and ends
-                with the SPICE error code, such as "SPICE(NOFRAMECONNECT)". Never raised
-                when `frame` is given or `pointing` is not "spice". Also raised if no
-                source gives the start time and the spacecraft clock kernel cannot
-                convert the clock count.
+                at that same time. With a `tracker` override, the kernels are read once,
+                at the start, midtime, or end of that exposure, as `tracker` selects.
+                Its message gives the time and the FITS file and ends with the SPICE
+                error code, such as "SPICE(NOFRAMECONNECT)". Never raised when `frame`
+                is given or `pointing` is not "spice". Also raised if no source gives the
+                start time and the spacecraft clock kernel cannot convert the clock
+                count.
             oops.OopsValueError: If `geom`, `pointing` or `fov_type` is not one of the
                 values listed above, if `select` is not None, if `geom` or `pointing` is
                 not "spice" in an astrometry read of a PDS3 label, which leaves the FITS
@@ -590,8 +592,9 @@ class NewHorizonsLORRI(oops.Host):
         else:
             hdulist = parsed
             if filepath is None:
-                if hdulist.filename() is not None:
-                    filepath = FCPath(hdulist.filename())
+                source = NewHorizonsLORRI._hdulist_path(hdulist)
+                if source is not None:
+                    filepath = FCPath(source)
                 if not NewHorizonsLORRI._detect_in_fits(hdulist):
                     hdulist.close()
                     name = ('HDUList without a file path' if filepath is None
@@ -612,7 +615,7 @@ class NewHorizonsLORRI(oops.Host):
                 headers = [hdu.header.copy() for hdu in hdulist]
                 if not astrometry:
                     arrays = NewHorizonsLORRI._read_arrays(hdulist)
-                    abspath = hdulist.filename()
+                    abspath = NewHorizonsLORRI._hdulist_path(hdulist)
             finally:
                 hdulist.close()
 
@@ -643,11 +646,17 @@ class NewHorizonsLORRI(oops.Host):
         and FILE_SPECIFICATION_NAME (:attr:`MERGE_SUPPLEMENT_BY_FILE` is True), because
         the index of NHJULO_1001, and so the cumulative index NHxxLO_1999, lists one file
         out of place, while the supplement lists the files in file order. The supplement
-        is read ahead only as far as the partner of the current row.
+        is read ahead only as far as the partner of the current row, and each supplement
+        row read ahead of its partner is kept until the partner is reached. The 100-row
+        chunks bound the rows parsed at a time, but the rows kept grow with how far the
+        supplement is out of step with the index; in the archive's tables, one row at
+        most is kept at a time.
 
         Parameters:
             filepath (str | pathlib.Path | FCPath): The full path to a New Horizons LORRI
-                index file or its PDS label, such as ``NHJULO_2001_index.lbl``.
+                index file or its PDS label, such as ``NHJULO_2001_index.lbl``. Given the
+                table, the PDS3 parser reads the whole table, looking for a label in it,
+                before it reads the label beside it, so the label is the faster input.
             supplement (str | pathlib.Path | FCPath | object, optional): The path to the
                 PDS label of the supplemental index, whose columns are merged into each
                 row; a LORRI index needs its supplement. Its rows must give the same
@@ -720,9 +729,10 @@ class NewHorizonsLORRI(oops.Host):
             `spacecraft_clock_start_count` and `spacecraft_clock_stop_count` where the
             row gives TARGET_NAME and the clock counts with values that do not count as
             missing, as for :meth:`from_file`. `abspath` is absent, because the FITS
-            file is not read. The calibrations are empty, because the tables lack
-            RSOLAR. The iteration stops at the first row that raises an error; `filter`
-            can leave such a row out.
+            file is not read. The tables lack RSOLAR, which the I/F calibration needs,
+            so the calibrations are empty unless the `calibrations` override gives
+            some. The iteration stops at the first row that raises an error;
+            `filter` can leave such a row out.
 
             `dict` is the row, merged with its row of the supplement,
             without the masks of the table reader or NumPy types, so that it can be
@@ -744,8 +754,9 @@ class NewHorizonsLORRI(oops.Host):
             :meth:`from_file`. The target body comes from TARGET_NAME as for
             :meth:`from_file`. The C kernels are consulted at the time at which
             :meth:`from_file` would read them, the row's midtime moved by a `cadence`
-            override and by a `timeshift` of the start/stop time ("T"), but a row
-            without pointing still gives an observation, and its frame raises
+            override and by a `timeshift` of the start/stop time ("T"), or the start,
+            midtime, or end that a `tracker` override selects, but a row without
+            pointing still gives an observation, and its frame raises
             `oops.OopsSpiceError` when it is evaluated.
             `filepath`, `basename`, and `image_url` name the FITS file, as a full path
             or URL: the row's FILE_SPECIFICATION_NAME, with the label's
@@ -776,10 +787,10 @@ class NewHorizonsLORRI(oops.Host):
                 either case, or that lacks EXPOSURE_DURATION, or lacks both START_TIME
                 and SPACECRAFT_CLOCK_START_COUNT.
             oops.host.HostIndexError: When this method is called, if `supplement` is None
-                while `row_dicts` is not given; if `supplement` is `oops.Host.SUPPLEMENT`
-                and the name of `filepath` lacks "_index"; or if either label does not
-                describe an index table with the columns VOLUME_ID and
-                FILE_SPECIFICATION_NAME. During the iteration:
+                or an empty string while `row_dicts` is not given; if `supplement` is
+                `oops.Host.SUPPLEMENT` and the name of `filepath` lacks "_index"; or if
+                either label does not describe an index table with the columns VOLUME_ID
+                and FILE_SPECIFICATION_NAME. During the iteration:
                 after the last row that a table file holds, if it holds fewer rows than
                 its label says; for a row longer than the label's row length, when the
                 iteration reaches the first of the 100 rows read with it, so those 100
@@ -802,9 +813,9 @@ class NewHorizonsLORRI(oops.Host):
         oops.Host._check_select(select, unit='row of a New Horizons LORRI index')
         NewHorizonsLORRI._check_option('fov_type', fov_type, _FOV_TYPES)
 
-        # The supplement is required, so None is refused rather than taken to mean "read
-        # the index alone"
-        if row_dicts is None and supplement is None:
+        # The supplement is required, so None or an empty path, either of which the index
+        # reader takes to mean "read the index alone", is refused
+        if row_dicts is None and not supplement:
             raise oops.host.HostIndexError(f'{NewHorizonsLORRI.NAME} index needs its '
                                            f'supplemental index: {filepath}')
 
@@ -919,6 +930,27 @@ class NewHorizonsLORRI(oops.Host):
 
         raise FileNotFoundError(f'FITS file {name} of PDS3 label not found: '
                                 f'{label.filepath}')
+
+    @staticmethod
+    def _hdulist_path(hdulist):
+        """The path of the local file that an HDUList was read from.
+
+        astropy names an HDUList read from a stream, such as an ``io.BytesIO``, after
+        the stream's type, as in "<class '_io.BytesIO'>", so its name counts as a path
+        only if it names a file.
+
+        Parameters:
+            hdulist (HDUList): The FITS file.
+
+        Returns:
+            str | None: The path of the file, or None if the HDUList was built in memory
+            or read from a stream.
+        """
+
+        name = hdulist.filename()
+        if name is None or not pathlib.Path(name).is_file():
+            return None
+        return name
 
     @staticmethod
     def _read_arrays(hdulist):
@@ -1098,7 +1130,7 @@ class NewHorizonsLORRI(oops.Host):
             obs.insert_subfield('headers', [NewHorizonsLORRI._header_as_json(header)
                                             for header in headers])
         NewHorizonsLORRI._insert_common_subfields(obs, items, binning_mode=binning_mode,
-                                                  target=target_name, ck=using_cks,
+                                                  target=params['target'], ck=using_cks,
                                                   time_from_sclk=time_from_sclk,
                                                   return_all_planets=return_all_planets)
         return obs
@@ -1188,7 +1220,7 @@ class NewHorizonsLORRI(oops.Host):
         obs = oops.observation.Snapshot(('v', 'u'), **params)
         obs.insert_subfield('dict', row_dict)
         NewHorizonsLORRI._insert_common_subfields(obs, items, binning_mode=binning_mode,
-                                                  target=target_name, ck=using_cks,
+                                                  target=params['target'], ck=using_cks,
                                                   time_from_sclk=time_from_sclk,
                                                   return_all_planets=return_all_planets)
         return obs
@@ -1205,7 +1237,9 @@ class NewHorizonsLORRI(oops.Host):
         camera frame itself is a fixed rotation that never consults the kernels, so a
         time shift of the frame ("F") shifts only that rotation, and the kernels are read
         at the observation's midtime, moved by a `cadence` override and by a time shift
-        of the cadence ("T").
+        of the cadence ("T"). With a `tracker` override, the kernels are read once, when
+        the tracking frame is built, at the start, midtime, or end of that cadence that
+        the override selects.
 
         Parameters:
             cadence (oops.cadence.Cadence): The cadence of the observation before the
@@ -1658,8 +1692,8 @@ class NewHorizonsLORRI(oops.Host):
             items (dict[str, Any]): The metadata items; TARGET_NAME and the clock counts
                 become subfields where they are given.
             binning_mode (str): "1X1" or "4X4".
-            target (str): The name of the default target, whose kernels are included in
-                `spice_kernels`.
+            target (str | oops.Body): The target of the observation, after any `target`
+                override, whose kernels are included in `spice_kernels`.
             ck (bool): True if the pointing comes from the C kernels, so that they are
                 included in `spice_kernels`.
             time_from_sclk (bool): True if the start time was converted from the clock
@@ -1682,7 +1716,9 @@ class NewHorizonsLORRI(oops.Host):
 
         # With a custom frame, pointing never came from a CK, so any CK that happens to be
         # furnished is unrelated to this observation and must not be reported as used.
-        kernels = _NewHorizons.used_kernels(obs.time, 'lorri', target=target, ck=ck,
+        # A `target` override can be a Body, whose kernels are found by its name.
+        kernels = _NewHorizons.used_kernels(obs.time, 'lorri',
+                                            target=getattr(target, 'name', target), ck=ck,
                                             return_all_planets=return_all_planets)
         obs.insert_subfield('spice_kernels', kernels)
         obs.insert_subfield('spice_to_frame', _SPICE_TO_FRAME)

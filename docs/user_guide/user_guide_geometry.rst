@@ -30,8 +30,9 @@ from the C kernels, it checks at once that they hold the pointing at the time wh
 observation will read them. That is the middle of the exposure, moved by any
 ``cadence`` override and by a ``timeshift`` of the start and stop times ("T"). A
 ``timeshift`` of the frame ("F") shifts only the fixed rotation from ``NH_LORRI_FLIPPED``
-to ``NH_LORRI``, so the C kernels are still read at that time. If they do not hold the
-pointing, it raises
+to ``NH_LORRI``, so the C kernels are still read at that time. With a ``tracker``
+override, they are read once instead, at the time within the exposure that the override
+selects: its start, middle, or end. If they do not hold the pointing, it raises
 :exc:`oops.OopsSpiceError` (see :doc:`user_guide_errors`).
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` looks the pointing up
 in the same way, and a row without pointing still gives a Snapshot, whose frame raises
@@ -67,7 +68,7 @@ host translates it by fixed rules:
    * - ``CALIBRATION``, or no name at all
      - ``NONE``
 
-Any other name is the target as it is, whether or not SPICE knows it. The light source
-is always the Sun.
+Any other name is the target as it is, whether or not SPICE knows it. By default the
+light source is the Sun, and the ``lightsource`` override replaces it.
 
 The ``label_target`` subfield keeps ``TARGET_NAME`` as the label spells it.

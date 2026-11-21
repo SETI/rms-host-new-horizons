@@ -150,7 +150,8 @@ from every label read.
      - The error estimates and quality flags of a calibrated image, except in an
        astrometry read (see :doc:`user_guide_products`).
    * - ``spice_kernels``
-     - The SPICE kernels used for the observation.
+     - The SPICE kernels used for the observation, including those of its target, as a
+       ``target`` override sets it.
    * - ``spice_frame_name``, ``spice_frame_id``, ``spice_to_frame``
      - The SPICE frame of the camera, ``NH_LORRI`` (-98300), and the rotation from it
        to the camera frame, which reverses its *y* and *z* axes (see

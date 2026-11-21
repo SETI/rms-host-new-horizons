@@ -12,9 +12,10 @@ The call itself checks the arguments and reads the PDS3 labels of the index and 
 supplement, so a wrong argument or a label that cannot be read raises an error at once.
 The rows are read as the iteration proceeds, 100 at a time, and each row's Snapshot is
 built when the iteration reaches that row, so neither table is held in memory whole. The
-memory used stays the same however long the index is when OOPS releases each row's
-camera frame along with its Snapshot; an OOPS that keeps those frames adds a few
-kilobytes for each row. An error in a row is raised when the iteration reaches it, after
+supplement rows read ahead of their own index rows are kept as well (see below), and in
+the archive's tables there is never more than one. The memory used stays the same
+however long the index is when OOPS releases each row's camera frame along with its
+Snapshot; an OOPS that keeps those frames adds a few kilobytes for each row. An error in a row is raised when the iteration reaches it, after
 the rows before it have been given. The one exception is a row longer than the label
 says, which is found as the rows are read: its error comes at the first of the 100 rows
 read with it. The iteration ends at the row that raises, and the rows after it are not built.
@@ -62,7 +63,8 @@ The ``supplement`` argument chooses the supplemental index:
   exist, and an index whose file name lacks ``_index`` raises
   :exc:`~oops.host.HostIndexError`.
 - A path or URL reads that file instead.
-- None raises :exc:`~oops.host.HostIndexError`, unless ``row_dicts`` is given.
+- None or an empty path raises :exc:`~oops.host.HostIndexError`, unless ``row_dicts`` is
+  given.
 
 The two tables must list the same images, but not necessarily in the same order. Until
 the index is corrected, the index of ``NHJULO_1001``, and so the cumulative
@@ -70,8 +72,9 @@ the index is corrected, the index of ``NHJULO_1001``, and so the cumulative
 image in file order. So each index row is merged with the supplement row
 that has the same ``VOLUME_ID`` and ``FILE_SPECIFICATION_NAME``. The supplement is read
 only as far ahead as the row that matches the current index row, and the rows read
-ahead are kept until their own index rows come. The Snapshots come in the order of the
-index.
+ahead are kept until their own index rows come, so the memory they take grows with how
+far the supplement is out of step with the index. In the archive's tables, one row at
+most is kept at a time. The Snapshots come in the order of the index.
 
 The host raises :exc:`~oops.host.HostIndexError`, naming both tables, when the two do
 not list the same images:
@@ -113,8 +116,8 @@ Other arguments
     The same as for :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`,
     applied to every row.
 
-Any other keyword raises :exc:`~oops.OopsTypeError`, so that a misspelled argument is
-not silently ignored.
+Any other keyword raises :exc:`TypeError`, so that a misspelled argument is not silently
+ignored.
 
 What one row gives
 ==================
@@ -140,11 +143,13 @@ the millisecond. The target comes from ``TARGET_NAME`` as for a label (see
 without their number, ``TARGET_NAME`` in ``dict`` and ``label_target`` give the label's
 name, such as ``J1 IO``, as for an image read from its label. By default the pointing
 comes from the C kernels and the position from the SPICE ephemerides, and the ``frame``
-and ``path`` overrides replace them. A row's list of calibrations is empty, because the
-tables lack RSOLAR, but the ``calibrations`` override supplies one.
+and ``path`` overrides replace them. The tables lack RSOLAR, which the I/F calibration
+of an image needs, so a row's list of calibrations is empty unless the
+``calibrations`` override gives one or more.
 
-The host looks up the pointing of each row at the middle of its exposure, but a row
-whose pointing the C kernels do not hold still gives a Snapshot. Its frame raises
+The host looks up the pointing of each row at the time when the observation will read
+it, as for an image (see :doc:`user_guide_geometry`), but a row whose pointing the C
+kernels do not hold still gives a Snapshot. Its frame raises
 :exc:`oops.OopsSpiceError` when it is evaluated, so one image without pointing does not
 stop the rest of the index.
 

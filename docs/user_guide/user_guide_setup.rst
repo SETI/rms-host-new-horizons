@@ -32,6 +32,9 @@ environment variables:
 The kernels and the database are the ones that OOPS itself uses. The
 `rms-oops README <https://github.com/SETI/rms-oops#environment-variables>`_ describes
 these variables and the ``SPICE`` directory of ``$OOPS_RESOURCES`` that holds them.
+The Ring-Moon Systems Node publishes these resources, the kernels and ``SPICE.db``
+included, at ``https://storage.googleapis.com/rms-node-oops-resources``, a URL that
+``OOPS_RESOURCES`` can name directly.
 
 The host selects its kernels from the database once, for the whole mission from the
 launch on 2006 January 19 through 2021: the leap-second kernel, the planetary constants
@@ -66,7 +69,8 @@ the kernels that existed before a given date, or to furnish a metakernel instead
 kernels chosen from the database, call
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` before opening the
 first image. Its ``planets`` option takes one planet number, from 1 to 9, or a sequence
-of them. This call defines only Jupiter and Pluto, planets 5 and 9, and their moons:
+of them. OOPS always defines the Sun, Mercury, Venus, Earth, and the Moon, and this call
+adds Jupiter and Pluto, planets 5 and 9, with their moons:
 
 .. code-block:: python
 

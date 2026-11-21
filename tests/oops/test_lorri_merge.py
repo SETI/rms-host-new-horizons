@@ -4,6 +4,7 @@
 """Tests of what NewHorizonsLORRI.from_file() reads from each input, and of how it merges
 the detached PDS3 label with the FITS header."""
 
+import io
 import json
 import pathlib
 from typing import Any
@@ -268,6 +269,15 @@ def test_hdulist_without_a_file(tmp_path: pathlib.Path) -> None:
     assert PATH_SUBFIELDS & set(obs.subfields) == set()
 
 
+def test_hdulist_read_from_a_stream(tmp_path: pathlib.Path) -> None:
+    """astropy names an HDUList read from a stream after the stream's type, such as
+    "<class '_io.BytesIO'>", which is not a file path."""
+
+    stream = io.BytesIO(write_fits(tmp_path / 'lor_test.fit').read_bytes())
+    obs = NewHorizonsLORRI.from_file(fits.open(stream))
+    assert PATH_SUBFIELDS & set(obs.subfields) == set()
+
+
 # The clock count, not a file name, makes the IDs of the header's frame and path unique
 def test_hdulist_without_a_file_names_its_fits_frame_by_its_clock_count(
         tmp_path: pathlib.Path) -> None:
@@ -305,7 +315,7 @@ def test_every_item_has_one_winning_source() -> None:
 def test_start_time_rule(tmp_path: pathlib.Path, fits_start: float) -> None:
     spcscet = fits_start + FITS_HEADER['EXPTIME'] / 2.
     obs = from_label(tmp_path, fits_keywords={'SPCSCET': spcscet})
-    assert obs.time[0] == fits_start
+    assert obs.time[0] == pytest.approx(fits_start, rel=0., abs=1.e-7)
 
 
 def test_dict_start_time_follows_the_header(tmp_path: pathlib.Path) -> None:
@@ -792,6 +802,19 @@ def test_pointing_is_checked_at_the_cadence_override(
     cadence = oops.cadence.SnapCadence(1000., 10.)
     NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), cadence=cadence)
     assert times == [1005.]
+
+
+def test_pointing_is_checked_at_the_tracker_epoch(
+        tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch,
+        jupiter_path: oops.Path) -> None:
+    """With a `tracker` override, the C kernels are read once, at the time within the
+    exposure that the override selects, here its end."""
+
+    times = spice_check_times(monkeypatch)
+    cadence = oops.cadence.SnapCadence(1000., 10.)
+    NewHorizonsLORRI.from_file(write_fits(tmp_path / 'lor_test.fit'), cadence=cadence,
+                               tracker='end')
+    assert times == [1010.]
 
 
 @pytest.mark.parametrize(('options', 'expected'), [

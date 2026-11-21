@@ -13,7 +13,8 @@ Reading an image file
 :exc:`oops.OopsSpiceError`
     The C kernels lack the pointing of the camera at the time when the observation will
     read them, the middle of the exposure as a ``cadence`` override or a ``timeshift`` of
-    the start and stop times sets it (see :doc:`user_guide_geometry`). The message gives
+    the start and stop times sets it, or the start, middle, or end that a ``tracker``
+    override selects (see :doc:`user_guide_geometry`). The message gives
     the time and the FITS file, and ends with the SPICE error code, such as
     ``SPICE(NOFRAMECONNECT)``. It is never raised for missing pointing when the
     caller supplies the pointing with the ``frame`` override, or takes it from the FITS

@@ -35,8 +35,8 @@ __all__ = ['NewHorizonsLORRI']
 
 class NewHorizonsLORRI(Host):
     # The runtime names the first parameter `fileinfo`, where Host names it `filepath`,
-    # and does not take **kwargs, where Host does, so that Python refuses a keyword not
-    # listed.
+    # does not take **kwargs, where Host does, so that Python refuses a keyword not
+    # listed, and accepts only None for select, which Host types more widely.
     # A missing or unreadable file raises OSError (FileNotFoundError for a FITS file that
     # a label names but that does not exist). A file whose content cannot be parsed or
     # used raises oops.host.HostFormatError, or its subclass PdsHostError for a label
@@ -54,7 +54,7 @@ class NewHorizonsLORRI(Host):
         geom: str = 'spice', pointing: str = 'spice', fov_type: str = 'fast',
         return_all_planets: bool = False,
         pds3_options: dict[str, Any] | None = None, astrometry: bool = False,
-        select: int | slice | str | tuple[int | slice | str, ...] | None = None,
+        select: None = None,
         target: str | Body | None = None, lightsource: LightSource | None = None,
         path: str | Path | None = None, frame: str | Frame | None = None,
         cadence: Cadence | None = None, fov: FOV | None = None,
@@ -63,13 +63,13 @@ class NewHorizonsLORRI(Host):
         navigation: tuple[float, ...] | None = None, tracker: str | None = None,
         parallel: Observation | None = None) -> Snapshot: ...
     # Every row is one Snapshot of a Ring-Moon Systems Node metadata index, read with its
-    # supplement. supplement=None without row_dicts raises oops.host.HostIndexError, a
-    # select other than None raises oops.OopsValueError, and any keyword not listed
-    # raises TypeError. The call reads only the labels; the iterator reads the index and
-    # its supplement 100 rows at a time, pairs each index row with the supplement row of
-    # the same file, and builds each row's Snapshot when it reaches the row. Host takes
-    # **kwargs here too, and the runtime does not, so that Python refuses a keyword not
-    # listed.
+    # supplement. supplement=None or '' without row_dicts raises
+    # oops.host.HostIndexError, a select other than None raises oops.OopsValueError, and
+    # any keyword not listed raises TypeError. The call reads only the labels; the
+    # iterator reads the index and its supplement 100 rows at a time, pairs each index
+    # row with the supplement row of the same file, and builds each row's Snapshot when
+    # it reaches the row. Host takes **kwargs here too, and the runtime does not, so that
+    # Python refuses a keyword not listed; and Host accepts other values of select.
     @staticmethod
     def from_index(  # type: ignore[override]
         filepath: str | pathlib.Path | FCPath, *,
@@ -78,8 +78,7 @@ class NewHorizonsLORRI(Host):
         row_dicts: Iterable[dict[str, Any]] | None = None,
         pds3_options: dict[str, Any] | None = None,
         filter: dict[str, Any] | None = None, fov_type: str = 'fast',
-        return_all_planets: bool = False,
-        select: int | slice | str | tuple[int | slice | str, ...] | None = None,
+        return_all_planets: bool = False, select: None = None,
         target: str | Body | None = None, lightsource: LightSource | None = None,
         path: str | Path | None = None, frame: str | Frame | None = None,
         cadence: Cadence | None = None, fov: FOV | None = None,
