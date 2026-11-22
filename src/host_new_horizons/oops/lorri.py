@@ -793,10 +793,10 @@ class NewHorizonsLORRI(oops.Host):
             oops.OopsValueError: When this method is called, if `fov_type` is not
                 "fast", "slow" or "flat", if `select` is not None, if `filter` uses a
                 column that neither table has, or if a value in `pds3_options` is
-                invalid while neither `label` nor `row_dicts` is given. With
-                `row_dicts`, `filter` is checked against the first row:
-                when this method is called if `row_dicts` is a sequence, such as a
-                list, and otherwise when the iteration reads the first row.
+                invalid while neither `label` nor `row_dicts` is given. With `row_dicts`,
+                `filter` is checked against the first row: when this method is called if
+                `row_dicts` is a sequence, such as a list, and otherwise when the
+                iteration reads the first row.
             oops.host.HostFormatError: When the iteration reaches a row that lacks
                 VOLUME_ID or FILE_SPECIFICATION_NAME, which only a row of `row_dicts` or a
                 null value can, whose BINNING_MODE is missing or not "1X1" or "4X4" in
@@ -805,18 +805,17 @@ class NewHorizonsLORRI(oops.Host):
             oops.host.HostIndexError: When this method is called, if `supplement` is None
                 or an empty string while `row_dicts` is not given; if `supplement` is
                 `oops.Host.SUPPLEMENT` and the name of `filepath` lacks "_index" while
-                `row_dicts` is not given; or if
-                either label does not describe an index table with the columns VOLUME_ID
-                and FILE_SPECIFICATION_NAME. During the iteration:
-                after the last row that a table file holds, if it holds fewer rows than
-                its label says; for a row longer than the label's row length, when the
-                iteration reaches the first of the 100 rows read with it, so those 100
-                rows are not given; when the supplement gives a file a second time while
-                the row with its first copy is still unpaired; when the whole supplement
-                has been read without finding the file of an index row; and, after the
-                last index row, if a table file holds more rows than its label says, or
-                if the supplement gives files that the index does not, or gives a file
-                more times than the index.
+                `row_dicts` is not given; or if either label does not describe an index
+                table with the columns VOLUME_ID and FILE_SPECIFICATION_NAME. During the
+                iteration: after the last row that a table file holds, if it holds fewer
+                rows than its label says; for a row longer than the label's row length,
+                when the iteration reaches the first of the 100 rows read with it, so
+                those 100 rows are not given; when the supplement gives a file a second
+                time while the row with its first copy is still unpaired; when the whole
+                supplement has been read without finding the file of an index row; and,
+                after the last index row, if a table file holds more rows than its label
+                says, or if the supplement gives files that the index does not, or gives
+                a file more times than the index.
             oops.host.PdsHostError: When this method is called, if the PDS label of
                 `filepath` or `supplement` cannot be parsed.
             oops.host.WrongHostError: When this method is called, if `filepath` is not a
@@ -1961,7 +1960,9 @@ class NewHorizonsLORRI(oops.Host):
                 to a metakernel file, to furnish instead of the kernels selected from the
                 database. A metakernel named in the database is the newest one released
                 by the start of `asof`; a metakernel file is used whatever the date. The
-                kernels that it lists are furnished whatever their release dates.
+                kernels that it lists are furnished whatever their release dates, after
+                the Solar System's, so a leap seconds kernel among them takes the place
+                of the one that `asof` chose.
             planets (int | collections.abc.Sequence[int], optional): The planet number,
                 1 to 9, or a sequence of planet numbers, such as (5, 9) for Jupiter and
                 Pluto, whose bodies :meth:`~oops.Body.define_solar_system` defines with
@@ -1971,10 +1972,14 @@ class NewHorizonsLORRI(oops.Host):
 
         Raises:
             oops.host.HostError: If the instrument kernel does not give a 1024x1024 image.
+            RuntimeError: If Saturn is among the planets and `asof` is a date from
+                2003-11-05 through 2004-04-26, because the frames kernel of Saturn's
+                small moons chosen for those dates has a malformed line that SPICE
+                rejects.
             ValueError: If `meta` is None and none of the spacecraft's C kernels was
                 released by the start of `asof`, as for any date up to and including
-                2015-03-12; or if `meta` names a metakernel in the database and none of
-                that name was released by the start of `asof`.
+                2015-03-12 outside that window; or if `meta` names a metakernel in the
+                database and none of that name was released by the start of `asof`.
         """
 
         # Quick exit after first call

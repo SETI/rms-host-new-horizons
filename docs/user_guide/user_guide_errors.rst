@@ -108,9 +108,9 @@ are still made, as their entries say, and so are those of each row.
     ``fov_type`` is not one of its values, ``select`` is not None, ``filter`` asks for a
     column that neither table has, or ``pds3_options`` holds an option that the parser
     does not accept. The options are checked only when the call parses the index's
-    label, so they are not checked when ``label`` is given. With ``row_dicts`` given as an iterable other than a list or
-    another sequence, a ``filter`` column that the first row lacks raises this error
-    when the iteration reads that row.
+    label, so they are not checked when ``label`` is given. With ``row_dicts`` given as
+    an iterable other than a list or another sequence, a ``filter`` column that the
+    first row lacks raises this error when the iteration reads that row.
 
 :exc:`~oops.host.WrongHostError`
     The file is not a New Horizons LORRI index.
