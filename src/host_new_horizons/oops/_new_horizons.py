@@ -1,6 +1,11 @@
 ##########################################################################################
 # host_new_horizons/oops/_new_horizons.py
 ##########################################################################################
+"""The New Horizons mission support that the LORRI host builds on.
+
+It furnishes the mission's SPICE kernels once, for the whole mission, and lists the
+kernels that an observation uses.
+"""
 
 import julian
 import spicedb

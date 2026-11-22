@@ -753,8 +753,10 @@ def test_fits_geometry_position(tmp_path: pathlib.Path, sun_path: oops.Path) -> 
 def test_fits_geometry_moves_linearly(tmp_path: pathlib.Path,
                                       sun_path: oops.Path) -> None:
     obs = load(tmp_path, geom='fits')
-    event = obs.path.wrt('SUN').event_at_time(obs.midtime + 10.)
-    assert event.pos.vals == pytest.approx([-1.e8 - 10., -2.e8 - 20., -3.e8 - 30.])
+    path = obs.path.wrt('SUN')
+    start = path.event_at_time(obs.midtime).pos.vals
+    later = path.event_at_time(obs.midtime + 10.).pos.vals
+    assert later - start == pytest.approx([-10., -20., -30.], abs=1.e-6)
 
 
 def test_fits_geometry_path_id(tmp_path: pathlib.Path, sun_path: oops.Path) -> None:
@@ -1285,8 +1287,14 @@ def test_from_index_rejects_an_index_row_given_twice(tmp_path: pathlib.Path) -> 
 
 
 def test_from_index_filter() -> None:
+    """The filter keeps every row whose column has the value, in the order of the index,
+    and only those: 24 of the 30 rows are binned 4x4."""
+
+    every = list(NewHorizonsLORRI.from_index(INDEX))
+    expected = [o.basename for o in every if o.binning_mode == '4X4']
     obs = NewHorizonsLORRI.from_index(INDEX, filter={'BINNING_MODE': '4x4'})
-    assert {o.binning_mode for o in obs} == {'4X4'}
+    assert len(expected) == 24
+    assert [o.basename for o in obs] == expected
 
 
 def test_from_index_rejects_an_unknown_filter_column() -> None:

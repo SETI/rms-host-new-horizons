@@ -183,5 +183,7 @@ Reading an index through oops.Host
 :meth:`oops.host.Host.from_index` recognizes a LORRI index from its label and passes it,
 with every other argument, to
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index`, which reads the index
-and its supplement itself. The two calls give the same Snapshots and raise the same
-errors.
+and its supplement itself. The two calls give the same Snapshots. To choose the host,
+:meth:`oops.host.Host.from_index` first parses the index label, unless ``label`` is
+given, also when ``row_dicts`` is given, so it can raise errors of its own: when that
+label cannot be read, and when no host, or more than one, claims the index.
