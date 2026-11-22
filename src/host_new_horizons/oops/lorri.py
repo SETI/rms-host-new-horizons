@@ -684,13 +684,12 @@ class NewHorizonsLORRI(oops.Host):
                 `pds3_options` are ignored, and the tables and their labels are left
                 unread.
             pds3_options (dict[str, Any], optional): Any keyword arguments and their
-                values to be passed to the :class:`~pdsparser.Pds3Label` parser. They
-                are checked when the call parses the index label, which it does only if
-                neither `label` nor `row_dicts` is given. Each label is parsed with one
-                method, "fast" unless they give another, and no later method is tried.
-                The supplement's label is parsed with that method alone, so the method
-                applies to the supplement even when `label` is given. Only with
-                `row_dicts` are the options left unused.
+                values to be passed to the :class:`~pdsparser.Pds3Label` parser. The
+                options are checked when the call is made, unless `row_dicts` is given,
+                when they are not used. The index's label is parsed with all of them, and
+                the supplement's label with the method alone. Each label is parsed with
+                one method, "fast" unless they give another, and no later method is
+                tried.
             filter (dict[str, Any], optional): A dictionary of index column names and
                 their values or a set or tuple of values. If provided, only rows of the
                 index in which each named column equals the value, falls in the set of
@@ -795,8 +794,9 @@ class NewHorizonsLORRI(oops.Host):
                 cannot be compared with that row's value.
             oops.OopsValueError: When this method is called, if `fov_type` is not
                 "fast", "slow" or "flat", if `select` is not None, if `filter` uses a
-                column that neither table has, or if a value in `pds3_options` is
-                invalid while neither `label` nor `row_dicts` is given. With `row_dicts`,
+                column that neither table has, or if `pds3_options` names a method the
+                parser does not have or an option it does not take. The call checks the
+                options when it is made, unless `row_dicts` is given. With `row_dicts`,
                 `filter` is checked against the first row: when this method is called if
                 `row_dicts` is a sequence, such as a list, and otherwise when the
                 iteration reads the first row.
@@ -808,10 +808,8 @@ class NewHorizonsLORRI(oops.Host):
             oops.host.HostIndexError: When this method is called, if `supplement` is None
                 or an empty string while `row_dicts` is not given; if `supplement` is
                 `oops.Host.SUPPLEMENT` and the name of `filepath` lacks "_index" while
-                `row_dicts` is not given; if either label does not describe an index
-                table with the columns VOLUME_ID and FILE_SPECIFICATION_NAME; or if
-                `label` is given and `pds3_options` names a method that the parser does
-                not have, which the parse of the supplement's label finds. During the
+                `row_dicts` is not given; or if either label does not describe an index
+                table with the columns VOLUME_ID and FILE_SPECIFICATION_NAME. During the
                 iteration: after the last row that a table file holds, if it holds fewer
                 rows than its label says; for a row longer than the label's row length,
                 when the iteration reaches the first of the 100 rows read with it, so

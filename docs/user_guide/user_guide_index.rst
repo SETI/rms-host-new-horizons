@@ -121,10 +121,11 @@ Other arguments
     value raises :exc:`~oops.OopsValueError`.
 
 ``pds3_options``
-    Options for the PDS3 label parser. The index's label is parsed with them, unless
-    ``label`` or ``row_dicts`` is given, and the supplement's label with their method
-    alone, unless ``row_dicts`` is given. Each label is parsed with one method, the fast
-    method unless the options give another, and no later method is tried.
+    Options for the PDS3 label parser. The options are checked when the call is made,
+    unless ``row_dicts`` is given, when they are not used. The index's label is parsed
+    with all of them, and the supplement's label with the method alone. Each label is
+    parsed with one method, the fast method unless the options give another, and no
+    later method is tried.
 
 ``fov_type``, ``return_all_planets``, and the standard overrides
     The same as for :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`,
