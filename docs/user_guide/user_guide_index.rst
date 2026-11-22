@@ -21,7 +21,9 @@ in a row is raised when the iteration reaches it, after the rows before it have 
 given. The one exception is a row longer than the label says, which is found as the
 rows are read: its error comes at the first of the 100 rows read with it. The iteration
 ends at the row that raises, and the rows after it are not built. The ``filter``
-argument, described below, can leave such a row out. To build every row at once, pass
+argument, described below, can leave out a row whose Snapshot would raise, but it cannot
+avoid an error in reading or pairing the rows of the tables, because the rows are
+filtered only after they have been read and paired. To build every row at once, pass
 the iterator to ``list()``:
 
 .. code-block:: python

@@ -70,9 +70,10 @@ class NewHorizonsLORRI(Host):
     # row with the supplement row of the same file, and builds each row's Snapshot when
     # it reaches the row. Rows given in row_dicts take the place of the tables: the call
     # then leaves both labels unread, so the checks of the labels, the index name, the
-    # host and pds3_options are not made; pds3_options is also left unchecked when label
-    # is given. Host takes **kwargs here too, and the runtime does not, so that Python
-    # refuses a keyword not listed; and Host accepts other values of select.
+    # host and pds3_options are not made. Otherwise pds3_options is checked when the call
+    # is made, also when label is given, and an invalid one raises oops.OopsValueError.
+    # Host takes **kwargs here too, and the runtime does not, so that Python refuses a
+    # keyword not listed; and Host accepts other values of select.
     @staticmethod
     def from_index(  # type: ignore[override]
         filepath: str | pathlib.Path | FCPath, *,

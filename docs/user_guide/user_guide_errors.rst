@@ -67,50 +67,71 @@ contain ``_index``, the index is not checked to be a New Horizons LORRI index, a
 are still made, as their entries say, and so are those of each row.
 
 :exc:`~oops.host.HostIndexError`
-    Raised by the call itself: ``supplement`` is None or an empty string, and
-    ``row_dicts`` is not given; ``supplement`` is left at its default, and the index's
-    file name lacks the ``_index`` from which the host finds the supplement; or either
-    label does not describe an index table with the columns ``VOLUME_ID`` and
-    ``FILE_SPECIFICATION_NAME``. Raised during the iteration: after the last row of a
-    table file that holds fewer rows than its label says; for a row longer than its
-    label's row length, at the first of the 100 rows read with it, so those 100 rows
-    are not built; for an index row whose image the supplement does not list, once the
-    whole supplement has been read; or for a supplement row that lists an image a second
-    time while its first row is still being kept. Raised after the last row: a table
-    file holds more rows than its label says, or the supplement lists images that the
-    index does not, or lists an image more times than the index.
+    When the call is made, any of these:
 
-:exc:`~oops.host.PdsHostError`
-    The PDS3 label of the index or of the supplement cannot be parsed.
+    - ``supplement`` is left at its default, and the index's file name lacks the
+      ``_index`` from which the host finds the supplement. This is not checked when
+      ``row_dicts`` is given.
+    - ``supplement`` is None or an empty string, and ``row_dicts`` is not given.
+    - A table cannot be read as an index, because its label lacks the table it points
+      to.
+    - A table lacks the column ``VOLUME_ID`` or ``FILE_SPECIFICATION_NAME``.
+
+    During the iteration:
+
+    - At an index row whose image the supplement does not list, once the whole
+      supplement has been read. An image that the index lists more times than the
+      supplement is found this way too.
+    - At a supplement row that lists an image a second time while its first row is
+      still being kept.
+    - After the last row of a table that holds fewer rows than its label says. Every
+      row that the table holds is given first.
+    - At a row that is longer than its label says. The rows are read 100 at a time, and
+      none of the 100 read with that row is given.
+
+    After the last row: a table holds more rows than its label says, or the supplement
+    lists images that the index does not, or lists an image more times than the index.
+
+    The tables are checked only for these errors. A value that cannot be read as the
+    number its column describes gives a warning and is left out of the row, as a missing
+    value is, so a row whose exposure cannot be read raises
+    :exc:`~oops.host.HostFormatError`. A row that is shorter than its label says is read
+    as it is.
 
 :exc:`FileNotFoundError`
-    The supplement's PDS3 label does not exist, which the call itself finds; or a table
-    file does not exist, which the iteration finds when it starts.
+    The PDS3 label of the supplement does not exist, when the call is made; or a table
+    file does not exist, when the iteration starts.
 
 :exc:`~oops.host.HostFormatError`
     A row lacks ``VOLUME_ID`` or ``FILE_SPECIFICATION_NAME``, which only a row given in
     ``row_dicts`` or a null value can; a row's ``BINNING_MODE`` is missing or is not
     ``1X1`` or ``4X4``; or a row lacks the exposure duration, or lacks both a start time
-    and a clock count. This error is raised when the iteration reaches that row.
+    and a clock count. The message gives the item and the FITS file, or the item alone
+    for a row without ``VOLUME_ID`` or ``FILE_SPECIFICATION_NAME``, whose file is not
+    known. This error is raised when the iteration reaches that row.
 
 :exc:`oops.OopsSpiceError`
     A row lacks a start time, and the clock kernel cannot convert its clock count. This
     error is raised when the iteration reaches that row.
 
+:exc:`TypeError`
+    A keyword argument is not one that the method accepts, when the call is made. This
+    is Python's own error for an unexpected keyword argument.
+
 :exc:`~oops.OopsTypeError`
     A range in ``filter`` cannot be compared with a row's value. This error is raised
     when the iteration reaches that row.
 
-:exc:`TypeError`
-    A keyword argument is not one that the method accepts, which the call itself finds.
-
 :exc:`~oops.OopsValueError`
-    ``fov_type`` is not one of its values, ``select`` is not None, ``filter`` asks for a
-    column that neither table has, or ``pds3_options`` holds an option that the parser
-    does not accept. The options are checked only when the call parses the index's
-    label, so they are not checked when ``label`` is given. With ``row_dicts`` given as
-    an iterable other than a list or another sequence, a ``filter`` column that the
-    first row lacks raises this error when the iteration reads that row.
+    ``fov_type`` is not one of its values, ``select`` is not None, ``filter`` gives a
+    column that neither table has, or ``pds3_options`` names a method the parser does
+    not have or an option it does not take. The call checks the options when it is
+    made, unless ``row_dicts`` is given. When ``row_dicts`` is given, ``filter`` is
+    checked against the first row: when the call is made if the rows are a list or
+    another sequence, and otherwise when the iteration reads that row.
+
+:exc:`~oops.host.PdsHostError`
+    The PDS3 label of the index or of the supplement cannot be parsed.
 
 :exc:`~oops.host.WrongHostError`
     The file is not a New Horizons LORRI index.
@@ -120,5 +141,8 @@ are still made, as their entries say, and so are those of each row.
     read.
 
 The iteration ends at the first row that raises, after the Snapshots of the rows before
-it. Missing pointing never stops the iteration: the Snapshot of a row without pointing
+it. The ``filter`` argument (see :doc:`user_guide_index`) can leave out a row whose
+Snapshot would raise, but it cannot avoid an error in reading or pairing the rows of the
+tables, because the rows are filtered only after they have been read and paired.
+Missing pointing never stops the iteration: the Snapshot of a row without pointing
 raises :exc:`oops.OopsSpiceError` only when its frame is evaluated.

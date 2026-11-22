@@ -746,8 +746,10 @@ class NewHorizonsLORRI(oops.Host):
             missing, as for :meth:`from_file`. `abspath` is absent, because the FITS
             file is not read. The tables lack RSOLAR, which the I/F calibration needs,
             so the calibrations are empty unless the `calibrations` override gives
-            some. The iteration stops at the first row that raises an error;
-            `filter` can leave such a row out.
+            some. The iteration stops at the first row that raises an error. `filter`
+            can leave out a row whose Snapshot would raise, but it cannot avoid an error
+            in reading or pairing the rows of the tables, because the rows are filtered
+            only after they have been read and paired.
 
             `dict` is the row, merged with its row of the supplement,
             without the masks of the table reader or NumPy types, so that it can be
@@ -792,8 +794,9 @@ class NewHorizonsLORRI(oops.Host):
                 cannot be compared with that row's value.
             oops.OopsValueError: When this method is called, if `fov_type` is not
                 "fast", "slow" or "flat", if `select` is not None, if `filter` uses a
-                column that neither table has, or if a value in `pds3_options` is
-                invalid while neither `label` nor `row_dicts` is given. With `row_dicts`,
+                column that neither table has, or if `pds3_options` names a method the
+                parser does not have or an option it does not take. The call checks the
+                options when it is made, unless `row_dicts` is given. With `row_dicts`,
                 `filter` is checked against the first row: when this method is called if
                 `row_dicts` is a sequence, such as a list, and otherwise when the
                 iteration reads the first row.
@@ -1952,10 +1955,10 @@ class NewHorizonsLORRI(oops.Host):
                 after the start of the date silently uses the kernel it would choose
                 without a date. A set of SP or C kernels keeps only those released by
                 the start of the date, so the later part of the mission can lack
-                coverage. The C kernels and a metakernel named in the database
-                never fall back, and ValueError is raised instead. The LORRI instrument
-                kernel is chosen from the database by this date, also with `meta`. None
-                to choose the newest kernels.
+                coverage. The C kernels and a metakernel named in the database never fall
+                back, and ValueError is raised instead. The LORRI instrument kernel is
+                chosen from the database by this date, also with `meta`. None to choose
+                the newest kernels.
             meta (str, optional): The name of a metakernel in the database, or the path
                 to a metakernel file, to furnish instead of the kernels selected from the
                 database. A metakernel named in the database is the newest one released
