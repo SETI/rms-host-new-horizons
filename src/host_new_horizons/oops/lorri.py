@@ -1948,19 +1948,20 @@ class NewHorizonsLORRI(oops.Host):
 
         Parameters:
             asof (str, optional): A date in ISO format. Each kernel is chosen from
-                those released before it, the leap seconds kernel included, and a query
-                of which every kernel was released on or after the date silently uses
-                the kernel it would choose without a date. A set of SP or C kernels keeps
-                only those released before the date, so the later part of the mission
-                can lack coverage. The C kernels and a metakernel named in the database
+                those released no later than the start (00:00) of that date, the leap
+                seconds kernel included, and a query of which every kernel was released
+                after the start of the date silently uses the kernel it would choose
+                without a date. A set of SP or C kernels keeps only those released by
+                the start of the date, so the later part of the mission can lack
+                coverage. The C kernels and a metakernel named in the database
                 never fall back, and ValueError is raised instead. The LORRI instrument
                 kernel is chosen from the database by this date, also with `meta`. None
                 to choose the newest kernels.
             meta (str, optional): The name of a metakernel in the database, or the path
                 to a metakernel file, to furnish instead of the kernels selected from the
                 database. A metakernel named in the database is the newest one released
-                before `asof`; a metakernel file is used whatever the date. The kernels
-                that it lists are furnished whatever their release dates.
+                by the start of `asof`; a metakernel file is used whatever the date. The
+                kernels that it lists are furnished whatever their release dates.
             planets (int | collections.abc.Sequence[int], optional): The planet number,
                 1 to 9, or a sequence of planet numbers, such as (5, 9) for Jupiter and
                 Pluto, whose bodies :meth:`~oops.Body.define_solar_system` defines with
@@ -1971,9 +1972,9 @@ class NewHorizonsLORRI(oops.Host):
         Raises:
             oops.host.HostError: If the instrument kernel does not give a 1024x1024 image.
             ValueError: If `meta` is None and none of the spacecraft's C kernels was
-                released before `asof`, as for any date up to and including 2015-03-12;
-                or if `meta` names a metakernel in the database and none of that name
-                was released before `asof`.
+                released by the start of `asof`, as for any date up to and including
+                2015-03-12; or if `meta` names a metakernel in the database and none of
+                that name was released by the start of `asof`.
         """
 
         # Quick exit after first call

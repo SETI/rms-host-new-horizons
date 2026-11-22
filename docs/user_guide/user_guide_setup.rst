@@ -65,8 +65,8 @@ Initialization
 The first call to :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` or
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_index` loads the kernels and
 defines the camera's fields of view. To choose the bodies that OOPS defines, to use
-the kernels released before a given date, or to furnish a metakernel instead of the kernels
-chosen from the database, call
+the kernels released by a given date, or to furnish a metakernel instead of the
+kernels chosen from the database, call
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` before opening the
 first image. Its ``planets`` option takes one planet number, from 1 to 9, or a sequence
 of them. OOPS always defines the Sun, Mercury, Venus, Earth, and the Moon, and this call
@@ -79,21 +79,21 @@ adds Jupiter and Pluto, planets 5 and 9, with their moons:
    NewHorizonsLORRI.initialize(planets=(5, 9))
 
 Its ``asof`` option takes a date, such as ``'2016-01-01'``, and each kernel is then
-chosen from those released before that date. Where every kernel that a query could
-choose was released on or after the date, the query silently uses the kernel it would
-choose without a date. That happens only when the whole query comes back empty: a set
-of SP or C kernels that covers the mission keeps just the kernels released before the
-date, so a date inside the mission can leave the later part of the mission uncovered.
-With ``asof='2015-06-01'``, for example, the C kernels end on 2015-01-01. The C kernels
-never fall back to the newest: for any date up to and including 2015-03-12, the day
-the first of them was released,
-:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` raises
+chosen from those released no later than the start (00:00) of that date. Where every
+kernel that a query could choose was released after the start of the date, the query
+silently uses the kernel it would choose without a date. That happens only when the
+whole query comes back empty: a set of SP or C kernels that covers the mission keeps
+just the kernels released by the start of the date, so a date inside the mission can
+leave the later part of the mission uncovered. With ``asof='2015-06-01'``, for example,
+the C kernels end on 2015-01-01. The C kernels never fall back to the newest: the first
+of them was released at 13:26 on 2015-03-12, so for any date up to and including
+2015-03-12, :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` raises
 :exc:`ValueError`. The date decides the leap seconds too: with ``asof='2015-06-01'``,
 the leap seconds kernel released on 2015-01-05 is used, which lacks the leap second at
 the end of 2016.
 
 With ``meta``, the date chooses the metakernel when ``meta`` names one in the kernel
-database: the newest one released before the date is used, and if none was,
+database: the newest one released by the start of the date is used, and if none was,
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` raises
 :exc:`ValueError`, because this choice never falls back to the newest either. A
 metakernel given by its file path is used whatever the date. The kernels that a
