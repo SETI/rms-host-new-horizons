@@ -1425,6 +1425,15 @@ def test_from_index_uses_a_given_label(monkeypatch: pytest.MonkeyPatch) -> None:
     assert labels == [label]
 
 
+def test_from_index_with_a_given_label_checks_the_method() -> None:
+    """The options are checked when the call is made, even when the index label is
+    given, so a method that the parser does not have raises an error."""
+
+    with pytest.raises(oops.OopsValueError, match=r"^invalid method: 'bogus'$"):
+        NewHorizonsLORRI.from_index(INDEX, label=Pds3Label(INDEX),
+                                    pds3_options={'method': 'bogus'})
+
+
 def test_from_index_rejects_an_unknown_keyword() -> None:
     with pytest.raises(TypeError, match=r"unexpected keyword argument 'supplementary'"):
         NewHorizonsLORRI.from_index(INDEX, supplementary=SUPPLEMENT)
