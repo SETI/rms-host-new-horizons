@@ -88,9 +88,12 @@ leave the later part of the mission uncovered. With ``asof='2015-06-01'``, for e
 the C kernels end on 2015-01-01. The C kernels never fall back to the newest: the first
 of them was released at 13:26 on 2015-03-12, so for any date up to and including
 2015-03-12, :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` raises
-:exc:`ValueError`. The date decides the leap seconds too: with ``asof='2015-06-01'``,
-the leap seconds kernel released on 2015-01-05 is used, which lacks the leap second at
-the end of 2016.
+:exc:`ValueError`. When Saturn is among the planets, as it is by default, any date from
+2003-11-05 through 2004-04-26 makes ``initialize()`` raise :exc:`RuntimeError` instead,
+because the frames kernel of Saturn's small moons chosen for those dates has a
+malformed line that SPICE rejects. The date decides the leap seconds too: with
+``asof='2015-06-01'``, the leap seconds kernel released on 2015-01-05 is used, which
+lacks the leap second at the end of 2016.
 
 With ``meta``, the date chooses the metakernel when ``meta`` names one in the kernel
 database: the newest one released by the start of the date is used, and if none was,

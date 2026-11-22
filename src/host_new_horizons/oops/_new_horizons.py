@@ -77,10 +77,14 @@ class _NewHorizons:
                 otherwise.
 
         Raises:
+            RuntimeError: If Saturn is among the planets and `asof` is a date from
+                2003-11-05 through 2004-04-26, because the frames kernel of Saturn's
+                small moons chosen for those dates has a malformed line that SPICE
+                rejects.
             ValueError: If `meta` is None and none of the spacecraft's C kernels was
                 released by the start of `asof`, as for any date up to and including
-                2015-03-12; or if `meta` names a metakernel in the database and none of
-                that name was released by the start of `asof`.
+                2015-03-12 outside that window; or if `meta` names a metakernel in the
+                database and none of that name was released by the start of `asof`.
         """
 
         if _NewHorizons.initialized:

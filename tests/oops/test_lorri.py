@@ -1411,15 +1411,20 @@ def test_from_index_rows_need_no_supplement() -> None:
                                                 supplement=None))) == 1
 
 
-def test_from_index_with_given_rows_skips_the_labels(tmp_path: pathlib.Path) -> None:
+@pytest.mark.parametrize('named', [False, True],
+                         ids=['default_supplement', 'named_supplement'])
+def test_from_index_with_given_rows_skips_the_labels(tmp_path: pathlib.Path,
+                                                     named: bool) -> None:
     """Given rows are used in place of the tables, so the call leaves both labels unread
-    and does not look for the supplement: an index label that does not exist, a name
-    without the "_index" from which the default supplement would be found, and an option
-    that the label parser would refuse still give the row's Snapshot."""
+    and does not look for the supplement: an index label that does not exist, an option
+    that the label parser would refuse, and either a name without the "_index" from which
+    the default supplement would be found or a named supplement that does not exist still
+    give the row's Snapshot."""
 
+    kwargs = {'supplement': tmp_path / 'NHJULO_2001_supplement.lbl'} if named else {}
     obs = list(NewHorizonsLORRI.from_index(tmp_path / 'NHJULO_2001.lbl',
                                            pds3_options={'bogus_option': 1},
-                                           row_dicts=[row()]))
+                                           row_dicts=[row()], **kwargs))
     assert len(obs) == 1
 
 
