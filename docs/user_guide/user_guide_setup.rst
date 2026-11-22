@@ -85,8 +85,8 @@ choose without a date. That happens only when the whole query comes back empty: 
 of SP or C kernels that covers the mission keeps just the kernels released before the
 date, so a date inside the mission can leave the later part of the mission uncovered.
 With ``asof='2015-06-01'``, for example, the C kernels end on 2015-01-01. The C kernels
-never fall back to the newest: for any date up to and including 2015-03-12, before the
-first of them was released,
+never fall back to the newest: for any date up to and including 2015-03-12, the day
+the first of them was released,
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.initialize` raises
 :exc:`ValueError`. The date decides the leap seconds too: with ``asof='2015-06-01'``,
 the leap seconds kernel released on 2015-01-05 is used, which lacks the leap second at
