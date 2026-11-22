@@ -21,7 +21,9 @@ in a row is raised when the iteration reaches it, after the rows before it have 
 given. The one exception is a row longer than the label says, which is found as the
 rows are read: its error comes at the first of the 100 rows read with it. The iteration
 ends at the row that raises, and the rows after it are not built. The ``filter``
-argument, described below, can leave such a row out. To build every row at once, pass
+argument, described below, can leave out a row whose Snapshot would raise, but it cannot
+avoid an error in reading or pairing the rows of the tables, because the rows are
+filtered only after they have been read and paired. To build every row at once, pass
 the iterator to ``list()``:
 
 .. code-block:: python
@@ -118,7 +120,13 @@ Other arguments
     Must be None. Each row is one image, so there is nothing to select, and any other
     value raises :exc:`~oops.OopsValueError`.
 
-``fov_type``, ``return_all_planets``, ``pds3_options``, and the standard overrides
+``pds3_options``
+    Options for the PDS3 label parser. The index's label is parsed with them, unless
+    ``label`` or ``row_dicts`` is given, and the supplement's label with their method
+    alone, unless ``row_dicts`` is given. Each label is parsed with one method, the fast
+    method unless the options give another, and no later method is tried.
+
+``fov_type``, ``return_all_planets``, and the standard overrides
     The same as for :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`,
     applied to every row.
 

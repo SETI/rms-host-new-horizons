@@ -69,16 +69,18 @@ are still made, as their entries say, and so are those of each row.
 :exc:`~oops.host.HostIndexError`
     Raised by the call itself: ``supplement`` is None or an empty string, and
     ``row_dicts`` is not given; ``supplement`` is left at its default, and the index's
-    file name lacks the ``_index`` from which the host finds the supplement; or either
+    file name lacks the ``_index`` from which the host finds the supplement; either
     label does not describe an index table with the columns ``VOLUME_ID`` and
-    ``FILE_SPECIFICATION_NAME``. Raised during the iteration: after the last row of a
-    table file that holds fewer rows than its label says; for a row longer than its
-    label's row length, at the first of the 100 rows read with it, so those 100 rows
-    are not built; for an index row whose image the supplement does not list, once the
-    whole supplement has been read; or for a supplement row that lists an image a second
-    time while its first row is still being kept. Raised after the last row: a table
-    file holds more rows than its label says, or the supplement lists images that the
-    index does not, or lists an image more times than the index.
+    ``FILE_SPECIFICATION_NAME``; or ``label`` is given and ``pds3_options`` names a
+    method that the parser does not have, which the parse of the supplement's label
+    finds. Raised during the iteration: after the last row of a table file that holds
+    fewer rows than its label says; for a row longer than its label's row length, at the
+    first of the 100 rows read with it, so those 100 rows are not built; for an index
+    row whose image the supplement does not list, once the whole supplement has been
+    read; or for a supplement row that lists an image a second time while its first row
+    is still being kept. Raised after the last row: a table file holds more rows than
+    its label says, or the supplement lists images that the index does not, or lists an
+    image more times than the index.
 
 :exc:`~oops.host.PdsHostError`
     The PDS3 label of the index or of the supplement cannot be parsed.
@@ -108,9 +110,12 @@ are still made, as their entries say, and so are those of each row.
     ``fov_type`` is not one of its values, ``select`` is not None, ``filter`` asks for a
     column that neither table has, or ``pds3_options`` holds an option that the parser
     does not accept. The options are checked only when the call parses the index's
-    label, so they are not checked when ``label`` is given. With ``row_dicts`` given as
-    an iterable other than a list or another sequence, a ``filter`` column that the
-    first row lacks raises this error when the iteration reads that row.
+    label, which it does only when neither ``label`` nor ``row_dicts`` is given. With
+    ``label`` given, the supplement's label is still parsed with the method that
+    ``pds3_options`` names, as the entry for :exc:`~oops.host.HostIndexError` says.
+    With ``row_dicts`` given as an iterable other than a list or another sequence, a
+    ``filter`` column that the first row lacks raises this error when the iteration
+    reads that row.
 
 :exc:`~oops.host.WrongHostError`
     The file is not a New Horizons LORRI index.

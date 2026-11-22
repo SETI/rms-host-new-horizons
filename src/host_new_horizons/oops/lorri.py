@@ -686,7 +686,11 @@ class NewHorizonsLORRI(oops.Host):
             pds3_options (dict[str, Any], optional): Any keyword arguments and their
                 values to be passed to the :class:`~pdsparser.Pds3Label` parser. They
                 are checked when the call parses the index label, which it does only if
-                neither `label` nor `row_dicts` is given.
+                neither `label` nor `row_dicts` is given. Each label is parsed with one
+                method, "fast" unless they give another, and no later method is tried.
+                The supplement's label is parsed with that method alone, so the method
+                applies to the supplement even when `label` is given. Only with
+                `row_dicts` are the options left unused.
             filter (dict[str, Any], optional): A dictionary of index column names and
                 their values or a set or tuple of values. If provided, only rows of the
                 index in which each named column equals the value, falls in the set of
@@ -743,8 +747,10 @@ class NewHorizonsLORRI(oops.Host):
             missing, as for :meth:`from_file`. `abspath` is absent, because the FITS
             file is not read. The tables lack RSOLAR, which the I/F calibration needs,
             so the calibrations are empty unless the `calibrations` override gives
-            some. The iteration stops at the first row that raises an error;
-            `filter` can leave such a row out.
+            some. The iteration stops at the first row that raises an error. `filter`
+            can leave out a row whose Snapshot would raise, but it cannot avoid an error
+            in reading or pairing the rows of the tables, because the rows are filtered
+            only after they have been read and paired.
 
             `dict` is the row, merged with its row of the supplement,
             without the masks of the table reader or NumPy types, so that it can be
@@ -802,8 +808,10 @@ class NewHorizonsLORRI(oops.Host):
             oops.host.HostIndexError: When this method is called, if `supplement` is None
                 or an empty string while `row_dicts` is not given; if `supplement` is
                 `oops.Host.SUPPLEMENT` and the name of `filepath` lacks "_index" while
-                `row_dicts` is not given; or if either label does not describe an index
-                table with the columns VOLUME_ID and FILE_SPECIFICATION_NAME. During the
+                `row_dicts` is not given; if either label does not describe an index
+                table with the columns VOLUME_ID and FILE_SPECIFICATION_NAME; or if
+                `label` is given and `pds3_options` names a method that the parser does
+                not have, which the parse of the supplement's label finds. During the
                 iteration: after the last row that a table file holds, if it holds fewer
                 rows than its label says; for a row longer than the label's row length,
                 when the iteration reaches the first of the 100 rows read with it, so
@@ -1949,10 +1957,10 @@ class NewHorizonsLORRI(oops.Host):
                 after the start of the date silently uses the kernel it would choose
                 without a date. A set of SP or C kernels keeps only those released by
                 the start of the date, so the later part of the mission can lack
-                coverage. The C kernels and a metakernel named in the database
-                never fall back, and ValueError is raised instead. The LORRI instrument
-                kernel is chosen from the database by this date, also with `meta`. None
-                to choose the newest kernels.
+                coverage. The C kernels and a metakernel named in the database never fall
+                back, and ValueError is raised instead. The LORRI instrument kernel is
+                chosen from the database by this date, also with `meta`. None to choose
+                the newest kernels.
             meta (str, optional): The name of a metakernel in the database, or the path
                 to a metakernel file, to furnish instead of the kernels selected from the
                 database. A metakernel named in the database is the newest one released

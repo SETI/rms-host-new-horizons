@@ -1442,6 +1442,18 @@ def test_from_index_uses_a_given_label(monkeypatch: pytest.MonkeyPatch) -> None:
     assert labels == [label]
 
 
+def test_from_index_with_a_given_label_parses_the_supplement_by_the_method() -> None:
+    """A given index label is not parsed again, but the supplement's label is still parsed
+    with the method that `pds3_options` names, so a method that the parser does not have
+    raises an error."""
+
+    with pytest.raises(oops.host.HostIndexError,
+                       match=r"NHJULO_2001_supplemental_index_edited\.lbl: "
+                             r"invalid method: 'bogus'"):
+        NewHorizonsLORRI.from_index(INDEX, label=Pds3Label(INDEX),
+                                    pds3_options={'method': 'bogus'})
+
+
 def test_from_index_rejects_an_unknown_keyword() -> None:
     with pytest.raises(TypeError, match=r"unexpected keyword argument 'supplementary'"):
         NewHorizonsLORRI.from_index(INDEX, supplementary=SUPPLEMENT)
