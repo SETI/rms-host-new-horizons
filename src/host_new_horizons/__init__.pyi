@@ -16,7 +16,7 @@ The detectors and support methods that a Host subclass overrides or calls, such 
 
 import pathlib
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, overload
 
 from filecache import FCPath
 from pdsparser import Pds3Label
@@ -32,6 +32,8 @@ from oops.path import Path
 
 __all__ = ['NewHorizonsLORRI']
 
+_Select = int | slice | tuple[int | slice, ...]
+
 class NewHorizonsLORRI(Host):
     # The runtime names the first parameter `fileinfo`, where Host names it `filepath`,
     # and does not take **kwargs, where Host does, so that Python refuses a keyword not
@@ -39,12 +41,28 @@ class NewHorizonsLORRI(Host):
     # cannot be read or interpreted raises oops.host.HostFormatError, or its subclass
     # PdsHostError for a label that cannot be parsed. select chooses among the one
     # observation of the file: None or 0 returns it, and a slice returns a tuple.
+    @overload  # type: ignore[override]
     @staticmethod
-    def from_file(  # type: ignore[override]
+    def from_file(
         fileinfo: str | pathlib.Path | FCPath, *,
         geom: str = 'spice', pointing: str = 'spice', fov_type: str = 'fast',
         pds3_options: dict[str, Any] | None = None, astrometry: bool = False,
-        select: int | slice | tuple[int | slice, ...] | None = None,
+        select: None = None,
+        target: str | Body | None = None, lightsource: LightSource | None = None,
+        path: str | Path | None = None, frame: str | Frame | None = None,
+        cadence: Cadence | None = None, fov: FOV | None = None,
+        calibrations: Calibration | list[Calibration] | None = None,
+        timeshift: tuple[float, str] | None = None,
+        navigation: tuple[float, ...] | None = None, tracker: str | None = None,
+        parallel: Observation | None = None
+    ) -> Snapshot: ...
+    @overload
+    @staticmethod
+    def from_file(
+        fileinfo: str | pathlib.Path | FCPath, *,
+        geom: str = 'spice', pointing: str = 'spice', fov_type: str = 'fast',
+        pds3_options: dict[str, Any] | None = None, astrometry: bool = False,
+        select: _Select,
         target: str | Body | None = None, lightsource: LightSource | None = None,
         path: str | Path | None = None, frame: str | Frame | None = None,
         cadence: Cadence | None = None, fov: FOV | None = None,
@@ -59,15 +77,34 @@ class NewHorizonsLORRI(Host):
     # rows at a time, pairs each index row with the supplement row of the same file, and
     # builds each row's Snapshot when it reaches the row. Host takes **kwargs here too,
     # and the runtime does not, so that Python refuses a keyword not listed.
+    @overload  # type: ignore[override]
     @staticmethod
-    def from_index(  # type: ignore[override]
+    def from_index(
         filepath: str | pathlib.Path | FCPath, *,
         supplement: str | pathlib.Path | FCPath | object | None = ...,
         label: Pds3Label | None = None,
         row_dicts: Iterable[dict[str, Any]] | None = None,
         pds3_options: dict[str, Any] | None = None,
         filter: dict[str, Any] | None = None, fov_type: str = 'fast',
-        select: int | slice | tuple[int | slice, ...] | None = None,
+        select: None = None,
+        target: str | Body | None = None, lightsource: LightSource | None = None,
+        path: str | Path | None = None, frame: str | Frame | None = None,
+        cadence: Cadence | None = None, fov: FOV | None = None,
+        calibrations: Calibration | list[Calibration] | None = None,
+        timeshift: tuple[float, str] | None = None,
+        navigation: tuple[float, ...] | None = None, tracker: str | None = None,
+        parallel: Observation | None = None
+    ) -> Iterator[Snapshot]: ...
+    @overload
+    @staticmethod
+    def from_index(
+        filepath: str | pathlib.Path | FCPath, *,
+        supplement: str | pathlib.Path | FCPath | object | None = ...,
+        label: Pds3Label | None = None,
+        row_dicts: Iterable[dict[str, Any]] | None = None,
+        pds3_options: dict[str, Any] | None = None,
+        filter: dict[str, Any] | None = None, fov_type: str = 'fast',
+        select: _Select,
         target: str | Body | None = None, lightsource: LightSource | None = None,
         path: str | Path | None = None, frame: str | Frame | None = None,
         cadence: Cadence | None = None, fov: FOV | None = None,

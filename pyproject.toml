@@ -13,7 +13,7 @@ dependencies = [
   "numpy>=2.0",
   "rms-filecache>=3.0.0",
   "rms-julian>=3.0.2",
-  "rms-oops @ git+https://github.com/SETI/rms-oops@rf_261124_host_contract",
+  "rms-oops @ git+https://github.com/SETI/rms-oops.git@rf_261124_host_contract",
   "rms-pdsparser>=2.4.1",
 ]
 license = "Apache-2.0"
