@@ -11,7 +11,7 @@ It returns an iterator, which gives the Snapshots row by row, in the order of th
 The call itself checks the arguments and reads the PDS3 labels of the index and its
 supplement, so a wrong argument or a label that cannot be read raises an error at once.
 The rows are read as the iteration proceeds, 100 at a time, and each row's Snapshot is
-built when the iteration reaches that row, so neither table is held in memory whole. An
+built when the iteration reaches that row. An
 error in a row is raised when the iteration reaches it, after the rows before it have
 been given, and the iteration ends there. A caller that needs ``len()`` or indexing
 passes the iterator to ``list()``:
@@ -47,13 +47,14 @@ The ``supplement`` argument chooses the supplemental index:
 
 Each index row is merged with the supplement row that has the same ``VOLUME_ID`` and
 ``FILE_SPECIFICATION_NAME``, wherever that row is in the supplement, because an index
-can list an image out of order. The cumulative indexes list a few images twice under one
-file name, once for each of two volumes, and ``VOLUME_ID`` tells them apart. No other
-column of the two rows is compared, because the two tables write several shared values
-in different forms. Where both tables give a column, the merged row has the index's
-value. For example, the index gives each clock count with its partition, as in
-``1/0030598438:48850``, where the supplement gives ``0030598438:48850``, so the merged
-row has the index's count.
+can list an image out of order. A supplement row read ahead of its own index row is held
+until that row comes, so the rows held grow with how far the two tables are out of step.
+The cumulative indexes list a few images twice under one file name, once for each of two
+volumes, and ``VOLUME_ID`` tells them apart. No other column of the two rows is
+compared, because the two tables write several shared values in different forms. Where
+both tables give a column, the merged row has the index's value. For example, the index
+gives each clock count with its partition, as in ``1/0030598438:48850``, where the
+supplement gives ``0030598438:48850``, so the merged row has the index's count.
 
 The host raises :exc:`~oops.host.HostIndexError`, naming both tables, when the two do
 not list the same images, at the row where it finds the difference.
@@ -77,7 +78,7 @@ Other arguments
 ``pds3_options``
     Options for the PDS3 label parser. The index's label is parsed with all of them, and
     the supplement's label with the method alone. The tables' labels are parsed as they
-    are written, with the fast method unless the options give another.
+    are written, with the strict method unless the options give another.
 
 ``fov_type``, ``select``, and the standard overrides
     The same as for :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`,

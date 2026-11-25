@@ -424,17 +424,17 @@ class NewHorizonsLORRI(oops.Host):
                 if an option in `pds3_options` is not one the parser accepts, or the
                 parser cannot convert a value in the label.
             oops.OopsIndexError: If `select` is an index other than 0 or -1.
-            oops.host.HostFormatError: If the FITS file is not valid FITS, or if the
-                label or the FITS file cannot be read or interpreted: the file ends
-                early, the primary array is not one image band, the array does not have
-                the lines and samples that the label's IMAGE object gives, or the files
-                lack an item the observation needs, such as the exposure duration, the
-                start time, or lines of an image size that LORRI takes. The message
-                names the file that was passed.
+            oops.host.HostFormatError: If the FITS file is not valid FITS; if the label
+                or the FITS file exists but cannot be read, as when access to it is
+                denied; or if either cannot be interpreted: the file ends early, the
+                primary array is not one image band, the array does not have the lines
+                and samples that the label's IMAGE object gives, or the files lack an
+                item the observation needs, such as the exposure duration, the start
+                time, or lines of an image size that LORRI takes. The message names the
+                file that was passed.
             oops.host.PdsHostError: If the PDS3 label cannot be parsed.
             oops.host.WrongHostError: If `fileinfo` is not a New Horizons LORRI PDS3
                 label or FITS file.
-            OSError: If the file cannot be read.
             TypeError: If a keyword argument is not one of those listed.
         """
 
@@ -511,16 +511,16 @@ class NewHorizonsLORRI(oops.Host):
         ``NHJULO_2001_index.lbl``, and its supplement,
         ``NHJULO_2001_supplemental_index.lbl``, which gives the binning mode and the
         exposure duration that the index lacks. When this method is called, it reads
-        only the labels of the two tables. The
-        iteration then reads the tables 100 rows at a time and builds each row's
-        Snapshot when it reaches that row, so the tables are never held in memory
-        whole.
+        only the labels of the two tables. The iteration then reads the tables 100 rows
+        at a time and builds each row's Snapshot when it reaches that row.
 
         Each index row is paired with the supplement row that gives the same VOLUME_ID
         and FILE_SPECIFICATION_NAME (:attr:`MERGE_SUPPLEMENT_BY_FILE` is True), wherever
-        that row is, because an index can list a file out of order. No other column of
-        the two rows is compared. Where both tables give a column, the merged row has
-        the index's value.
+        that row is, because an index can list a file out of order. A supplement row
+        read ahead of its partner is held until the partner is reached, so the rows
+        held grow with how far the two tables are out of step. No other column of the
+        two rows is compared. Where both tables give a column, the merged row has the
+        index's value.
 
         Every row of the index gives an observation, in the index's order, with the
         values of the row as the tables give them:
@@ -553,7 +553,8 @@ class NewHorizonsLORRI(oops.Host):
             pds3_options (dict[str, Any], optional): Any keyword arguments and their
                 values to be passed to the :class:`~pdsparser.Pds3Label` parser. The
                 index's label is parsed with all of them, and the supplement's label
-                with the method alone, "fast" unless they give another.
+                with the method alone, "strict" unless they give another; for example,
+                ``pds3_options={'method': 'fast'}`` parses both with "fast".
             filter (dict[str, Any], optional): A dictionary of index column names and
                 their values or a set or tuple of values. If provided, only rows of the
                 index in which each named column equals the value, falls in the set of
@@ -598,8 +599,9 @@ class NewHorizonsLORRI(oops.Host):
                 be specified.
 
         Returns:
-            collections.abc.Iterator[Snapshot]: One observation per filtered row of the
-            index, in the index's order, each with the subfields `target`,
+            collections.abc.Iterator[Snapshot | tuple[Snapshot, ...]]: One observation
+            per filtered row of the index, in the index's order, or the tuple that a
+            slice in `select` chooses from it. Each has the subfields `target`,
             `lightsource`, `calibrations`, `dict`, `filepath`, `basename`,
             `spice_to_frame`, `spice_frame_name`, `spice_frame_id`, `ck_object_id`,
             `ck_sclk_id` and `spice_frame_is_frozen`, as for :meth:`from_file`, and

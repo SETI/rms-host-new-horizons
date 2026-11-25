@@ -11,12 +11,12 @@ Reading an image file
 :meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` raises:
 
 :exc:`~oops.host.HostFormatError`
-    The label or the FITS file cannot be read or interpreted: the FITS file is not valid
-    FITS or ends early; its primary array is not one image band; the array does not have
-    the lines and samples that the label's ``IMAGE`` object gives; or the files lack an
-    item that the Snapshot needs, such as the exposure duration, the start time, or
-    lines of an image size that LORRI takes. The message names the file that was passed
-    and the failure.
+    The label or the FITS file exists but cannot be read, as when access to it is denied,
+    or cannot be interpreted: the FITS file is not valid FITS or ends early; its primary
+    array is not one image band; the array does not have the lines and samples that the
+    label's ``IMAGE`` object gives; or the files lack an item that the Snapshot needs,
+    such as the exposure duration, the start time, or lines of an image size that LORRI
+    takes. The message names the file that was passed and the failure.
 
 :exc:`~oops.host.PdsHostError`
     The parser cannot read the PDS3 label.
@@ -38,9 +38,6 @@ Reading an image file
 
 :exc:`TypeError`
     A keyword argument is not one that the method accepts.
-
-:exc:`OSError`
-    A file cannot be read.
 
 Missing pointing raises no error here: the Snapshot's frame raises the SPICE error when
 it is used (see :doc:`user_guide_geometry`).
