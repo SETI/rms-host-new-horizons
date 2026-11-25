@@ -95,6 +95,13 @@ def test_index_value_wins_over_the_supplements() -> None:
     assert obs.dict['SPACECRAFT_CLOCK_START_COUNT'] == '1/0030702838:48850'
 
 
+def test_a_declared_null_stays_in_dict_as_the_table_gives_it() -> None:
+    """A column that holds a declared null text appears in `dict` with that text."""
+
+    obs = row_observation(FILTER_NAME='N/A')
+    assert obs.dict['FILTER_NAME'] == 'N/A'
+
+
 def test_clock_counts_as_the_row_gives_them() -> None:
     """The clock-count subfields are the row's, with the index's partition."""
 

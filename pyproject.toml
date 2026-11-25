@@ -10,13 +10,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "astropy>=6.1",
-  "cspyce>=2.3.2",
   "numpy>=2.0",
   "rms-filecache>=3.0.0",
   "rms-julian>=3.0.2",
   "rms-oops @ git+https://github.com/SETI/rms-oops@rf_261124_host_contract",
   "rms-pdsparser>=2.4.1",
-  "rms-pdstable>=1.2.0",
 ]
 license = "Apache-2.0"
 authors = [
@@ -53,6 +51,7 @@ Issues = "https://github.com/SETI/rms-host-new-horizons/issues"
 dev = [
   "codespell>=2.4",
   "coverage>=7.0",
+  "cspyce>=2.3.2",
   "flake8>=7.0",
   "mypy>=1.0",
   "pip-audit>=2.7",

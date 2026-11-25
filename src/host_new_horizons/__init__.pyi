@@ -18,7 +18,6 @@ import pathlib
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from astropy.io.fits import HDUList
 from filecache import FCPath
 from pdsparser import Pds3Label
 from oops import Body
@@ -42,7 +41,7 @@ class NewHorizonsLORRI(Host):
     # observation of the file: None or 0 returns it, and a slice returns a tuple.
     @staticmethod
     def from_file(  # type: ignore[override]
-        fileinfo: str | pathlib.Path | FCPath | HDUList, *,
+        fileinfo: str | pathlib.Path | FCPath, *,
         geom: str = 'spice', pointing: str = 'spice', fov_type: str = 'fast',
         pds3_options: dict[str, Any] | None = None, astrometry: bool = False,
         select: int | slice | tuple[int | slice, ...] | None = None,

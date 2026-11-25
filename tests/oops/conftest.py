@@ -158,6 +158,8 @@ class FakeSpiceDB:
         """A function that records each call under `name` and returns an empty list."""
 
         def record(*args: Any, **kwargs: Any) -> list[str]:
+            """Record the call and return an empty list."""
+
             self.calls.append((name, args, kwargs))
             return []
 
@@ -172,12 +174,20 @@ class FakeSpiceFrame(oops.Frame):
     """A stand-in for a SpiceFrame: the identity rotation from J2000."""
 
     def __init__(self, frame_id: str) -> None:
+        """Register the frame under `frame_id`.
+
+        Parameters:
+            frame_id (str): The ID of the frame.
+        """
+
         self._reference = oops.Frame.J2000
         self._origin = None
         self._shape = ()
         self._register(frame_id)
 
     def transform_at_time(self, time: Any, *, quick: Any = None) -> oops.Transform:
+        """The identity transform, at any time."""
+
         return oops.Transform(oops.Matrix3.IDENTITY, oops.Vector3.ZERO, self._wayframe,
                               self._reference)
 
@@ -223,14 +233,20 @@ def fake_spice(monkeypatch: pytest.MonkeyPatch) -> FakeSpice:
     fake = FakeSpice()
 
     def define_solar_system(*args: Any, **kwargs: Any) -> None:
+        """Record the call without defining any body."""
+
         fake.solar_system.append((args, kwargs))
 
     def spice_path(spice_id: str, origin: str) -> oops.Path:
+        """Record the call and return a fixed path at the origin."""
+
         fake.spice_paths.append((spice_id, origin))
         return oops.path.FixedPath((0., 0., 0.), oops.Path.SSB, oops.Frame.J2000,
                                    path_id=spice_id)
 
     def spice_frame(spice_frame: str, *, frame_id: str) -> oops.Frame:
+        """Record the call and return a :class:`FakeSpiceFrame`."""
+
         fake.spice_frames.append((spice_frame, frame_id))
         return FakeSpiceFrame(frame_id)
 

@@ -254,16 +254,6 @@ def test_missing_fits_file_of_a_label(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_file(label)
 
 
-def test_hdulist_is_read_and_closed(tmp_path: pathlib.Path) -> None:
-    """An HDUList is read as its file and closed afterward."""
-
-    path = write_fits(tmp_path / 'a.fit')
-    hdulist = fits.open(path)
-    obs = single(NewHorizonsLORRI.from_file(hdulist))
-    assert obs.filepath == FCPath(path)
-    assert hdulist._file.closed
-
-
 def test_dispatcher_reads_a_label(tmp_path: pathlib.Path) -> None:
     """oops.Host.from_file hands a LORRI label to this host."""
 
@@ -287,6 +277,8 @@ def test_default_parse_method_is_strict(tmp_path: pathlib.Path,
     original = NewHorizonsLORRI._read_fileinfo
 
     def spy(fileinfo: Any, **kwargs: Any) -> Any:
+        """Record the PDS3 options of the call, then make it."""
+
         options.append(kwargs.get('pds3_options'))
         return original(fileinfo, **kwargs)
 
@@ -303,6 +295,8 @@ def test_caller_parse_method(tmp_path: pathlib.Path,
     original = NewHorizonsLORRI._read_fileinfo
 
     def spy(fileinfo: Any, **kwargs: Any) -> Any:
+        """Record the PDS3 options of the call, then make it."""
+
         options.append(kwargs.get('pds3_options'))
         return original(fileinfo, **kwargs)
 
@@ -425,10 +419,6 @@ def test_unparsable_label(tmp_path: pathlib.Path) -> None:
         NewHorizonsLORRI.from_file(label)
 
 
-# oops leaves open the FITS file that it refuses for this host, which only the garbage
-# collector closes
-@pytest.mark.filterwarnings('ignore::ResourceWarning',
-                            'ignore::pytest.PytestUnraisableExceptionWarning')
 def test_fits_file_of_another_instrument(tmp_path: pathlib.Path) -> None:
     """A FITS file of another instrument raises WrongHostError."""
 
@@ -568,6 +558,8 @@ def test_no_pointing_check(tmp_path: pathlib.Path,
     it is used."""
 
     def no_pointing(self: FakeSpiceFrame, time: Any, *, quick: Any = None) -> None:
+        """Raise the SPICE error for a frame that no C kernel gives."""
+
         raise KeyError('SPICE(NOFRAMECONNECT)')
 
     monkeypatch.setattr(FakeSpiceFrame, 'transform_at_time', no_pointing)
@@ -678,6 +670,8 @@ def test_no_iof_calibration_without_an_ephemeris(tmp_path: pathlib.Path,
     """A target whose position the SP kernels do not give gives no calibration."""
 
     def no_ephemeris(self: oops.Path, time: Any, **kwargs: Any) -> None:
+        """Raise the SPICE error for a target that the SP kernels do not give."""
+
         raise OSError('SPICE(SPKINSUFFDATA)')
 
     monkeypatch.setattr(oops.path.FixedPath, 'event_at_time', no_ephemeris)

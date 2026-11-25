@@ -16,7 +16,6 @@ import numpy as np
 
 import julian
 
-from astropy.io               import fits as pyfits
 from astropy.utils.exceptions import AstropyUserWarning
 from filecache                import FCPath
 from pdsparser                import Pds3Label
@@ -121,10 +120,8 @@ _AU = 149597870.7
 _COMMENTARY_KEYWORDS = ('', 'COMMENT', 'HISTORY')
 
 # The FITS keywords that are converted to the PDS3 items START_TIME, EXPOSURE_DURATION,
-# TARGET_NAME and the clock counts, and so appear in `dict` only under those names. NAXIS2
-# gives the lines of the image, which the label gives inside its IMAGE object, so it
-# keeps its own name in `dict`.
-_CONVERTED_KEYWORDS = ('SPCSCET', 'EXPTIME', 'SPCCBTNM', 'SPCSCLK0', 'STOPMET')
+# TARGET_NAME, LINES and the clock counts, and so appear in `dict` only under those names.
+_CONVERTED_KEYWORDS = ('SPCSCET', 'EXPTIME', 'SPCCBTNM', 'SPCSCLK0', 'STOPMET', 'NAXIS2')
 
 ##########################################################################################
 # The resolution rules. Where the detached label and the FITS header both give an item
@@ -316,10 +313,8 @@ class NewHorizonsLORRI(oops.Host):
         kernels do not give its position at that time.
 
         Parameters:
-            fileinfo (str | pathlib.Path | FCPath | HDUList): The path to the FITS file
-                or its PDS3 label, or the FITS file opened as an HDUList, which is read
-                as the file it was opened from. The FITS file is closed once it has
-                been read, including an HDUList that was passed in.
+            fileinfo (str | pathlib.Path | FCPath): The path to the FITS file or its
+                PDS3 label. The FITS file is closed once it has been read.
             geom (str, optional): "spice" to take the spacecraft's position from the SP
                 kernels; "fits" to take it from the FITS header, as a linear path
                 relative to the Sun through the position and velocity that SPCSSCX,
@@ -688,7 +683,7 @@ class NewHorizonsLORRI(oops.Host):
         through which this host reads its files.
 
         Parameters:
-            fileinfo (str | pathlib.Path | FCPath | HDUList): The file, as for
+            fileinfo (str | pathlib.Path | FCPath): The file, as for
                 :meth:`from_file`.
             astrometry (bool): True to read no arrays, and a PDS3 label without its FITS
                 file.
@@ -709,8 +704,6 @@ class NewHorizonsLORRI(oops.Host):
                 is not this host's.
         """
 
-        name = (fileinfo.filename() if isinstance(fileinfo, pyfits.HDUList)
-                else fileinfo)
         try:
             return NewHorizonsLORRI._read_and_interpret(fileinfo, astrometry=astrometry,
                                                         geom=geom, pointing=pointing,
@@ -720,7 +713,7 @@ class NewHorizonsLORRI(oops.Host):
         except (KeyError, IndexError, TypeError, ValueError, OSError,
                 AstropyUserWarning) as err:
             raise oops.host.HostFormatError(f'cannot read the {NewHorizonsLORRI.NAME} '
-                                            f'file {name}: {type(err).__name__}: '
+                                            f'file {fileinfo}: {type(err).__name__}: '
                                             f'{err}') from err
 
     @staticmethod
@@ -728,7 +721,7 @@ class NewHorizonsLORRI(oops.Host):
         """The work of :meth:`_read`, which converts the errors it raises.
 
         Parameters:
-            fileinfo (str | pathlib.Path | FCPath | HDUList): The file, as for
+            fileinfo (str | pathlib.Path | FCPath): The file, as for
                 :meth:`from_file`.
             astrometry (bool): True to read no arrays, and a PDS3 label without its FITS
                 file.
@@ -760,12 +753,8 @@ class NewHorizonsLORRI(oops.Host):
             else:
                 hdulist = NewHorizonsLORRI._read_fileinfo(image_path, formats='F')
         else:
-            # oops opens a FITS file from its local copy, so the caller's path, which may
-            # be a URL, names it; an HDUList passed in names only the file it was opened
-            # from
             hdulist = parsed
-            image_path = FCPath(fileinfo if hdulist is not fileinfo
-                                else hdulist.filename())
+            image_path = FCPath(fileinfo)
 
         headers = None
         header_dict = None
@@ -999,7 +988,7 @@ class NewHorizonsLORRI(oops.Host):
 
         items = {}
         if given('EXPTIME'):
-            items['EXPOSURE_DURATION'] = header_dict['EXPTIME']
+            items['EXPOSURE_DURATION'] = float(header_dict['EXPTIME'])
             if given('SPCSCET'):
                 items['START_TIME'] = header_dict['SPCSCET'] - header_dict['EXPTIME'] / 2.
         if given('SPCCBTNM'):

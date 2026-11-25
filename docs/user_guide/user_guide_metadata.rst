@@ -33,9 +33,7 @@ host converts it to the PDS3 name and to the form that the PDS3 label uses:
   ``LINES`` of its ``IMAGE`` object.
 
 A converted value appears in the merged metadata only under its PDS3 name, and the
-original keyword stays in ``header_dict``. ``NAXIS2`` is the exception: it keeps its
-name, because the PDS3 label gives the lines only inside its ``IMAGE`` object. A header
-keyword that has no PDS3 equivalent keeps its own name.
+original keyword stays in ``header_dict``. A header keyword that has no PDS3 equivalent keeps its own name.
 
 Where only one label gives an item, its value is used. Where both give it and agree,
 that value is used. Where both give it and disagree, the item always takes its value

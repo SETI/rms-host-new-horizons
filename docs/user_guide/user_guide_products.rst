@@ -72,6 +72,6 @@ It also has none when the exposure is zero, and when the target has no ephemeris
 registered path in OOPS, or no position in the SPICE kernels at that time. The host
 loads no kernels for small bodies, so the minor planets and the Kuiper Belt objects that
 the mission imaged have no calibration unless the caller furnishes their kernels and
-defines their paths in OOPS. Index
-rows have none, because the tables do not give RSOLAR. The ``calibrations`` override
-supplies a calibration in every case, and ``calibrations=[]`` turns it off.
+defines their paths in OOPS. Index rows have none, because the tables do not give
+RSOLAR. The ``calibrations`` override supplies a calibration in every case, and
+``calibrations=[]`` turns it off.

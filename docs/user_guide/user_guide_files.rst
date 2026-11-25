@@ -74,11 +74,6 @@ The file subfields name the FITS file, also when the input is the label:
     The absolute path or URL of the PDS3 label and its path on the local disk, present
     only when the input is the label.
 
-A FITS file that has already been opened as an :class:`~astropy.io.fits.HDUList` can be
-passed in place of its path, which is how :meth:`oops.host.Host.from_file` passes it on.
-The file subfields then name the file that it was opened from, and the host closes it
-once it has copied out the headers and arrays.
-
 Options
 =======
 
@@ -125,11 +120,6 @@ Reading a file through oops.Host
 
 :meth:`oops.host.Host.from_file` recognizes a LORRI image from its PDS3 label or its
 FITS header and passes it, with every other argument, to
-:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`. A label is passed as
-its path, and the host parses it itself with the strict method, so the two calls read
-the same labels.
-
-The two calls differ in one default. :meth:`oops.host.Host.from_file` passes
-``calibrations=[]`` unless the caller gives calibrations, and an empty list turns the
-host's I/F calibration off. To have the I/F calibration, call
-:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file` directly.
+:meth:`~host_new_horizons.oops.lorri.NewHorizonsLORRI.from_file`. A label or a FITS file
+is passed as its path, and the host reads it itself, with the strict method for a label,
+so the two calls read the same files.

@@ -68,6 +68,8 @@ def test_initialize_closes_the_database_after_a_failure(fake_spicedb: FakeSpiceD
     """The database is closed even when furnishing fails."""
 
     def fail(*args: object, **kwargs: object) -> list[str]:
+        """Raise the error of a database that cannot be read."""
+
         raise OSError('no database')
 
     monkeypatch.setattr(spicedb, 'furnish_lsk', fail)

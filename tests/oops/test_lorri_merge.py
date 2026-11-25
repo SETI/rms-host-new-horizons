@@ -107,6 +107,7 @@ def test_times_from_the_label_when_the_header_has_no_exposure(tmp_path: pathlib.
 
     obs = read(tmp_path, fits={'EXPTIME': None}, label={'EXPOSURE_DURATION': '4.999 <s>'})
     assert obs.texp == 4.999
+    assert obs.dict['START_TIME'] == dt.datetime(2007, 1, 10, 5, 41, 8, 363000)
 
 
 def test_null_label_lines(tmp_path: pathlib.Path) -> None:
@@ -249,7 +250,7 @@ def test_converted_keywords_are_left_out_of_dict(tmp_path: pathlib.Path) -> None
     """A FITS keyword converted to a PDS3 item appears only under the item's name."""
 
     obs = read_fits(tmp_path)
-    assert {'SPCSCET', 'EXPTIME', 'SPCCBTNM', 'SPCSCLK0', 'STOPMET'} & set(
+    assert {'SPCSCET', 'EXPTIME', 'SPCCBTNM', 'SPCSCLK0', 'STOPMET', 'NAXIS2'} & set(
         obs.dict) == set()
 
 
@@ -266,7 +267,21 @@ def test_other_header_keywords_in_dict(tmp_path: pathlib.Path) -> None:
     """A header keyword that is not converted keeps its own name in `dict`."""
 
     obs = read_fits(tmp_path)
-    assert obs.dict['NAXIS2'] == 1024
+    assert obs.dict['SPCEMEN'] == 275.0
+
+
+def test_naxis2_stays_in_the_header_dict(tmp_path: pathlib.Path) -> None:
+    """The converted NAXIS2 is in `header_dict` under its own name."""
+
+    obs = read_fits(tmp_path)
+    assert obs.header_dict['NAXIS2'] == 1024
+
+
+def test_integer_exposure_time_is_a_float(tmp_path: pathlib.Path) -> None:
+    """An integer EXPTIME gives a float EXPOSURE_DURATION in `dict`."""
+
+    obs = read_fits(tmp_path, EXPTIME=5)
+    assert isinstance(obs.dict['EXPOSURE_DURATION'], float)
 
 
 def test_commentary_cards_are_left_out_of_dict(tmp_path: pathlib.Path) -> None:
